@@ -3,7 +3,13 @@ const DEFAULT_SETTINGS = {
   locationKeywords: "",
   salaryKeywords: "",
   companyKeywords: "",
+  excludeCompanyKeywords: "",
+  recruiterActiveStatuses: [],
   greetTemplate: "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+  sendImageResume: false,
+  imageResumeFileName: "",
+  imageResumeDataUrl: "",
+  imageResumeMimeType: "",
   autoGreet: true,
   autoNext: true,
   enabled: true,
@@ -127,11 +133,28 @@ function normalizeSettings(payload = {}) {
   return {
     ...DEFAULT_SETTINGS,
     ...payload,
+    excludeCompanyKeywords: String(payload.excludeCompanyKeywords || "").trim(),
+    recruiterActiveStatuses: normalizeStringArray(payload.recruiterActiveStatuses),
+    sendImageResume: Boolean(payload.sendImageResume),
+    imageResumeFileName: String(payload.imageResumeFileName || "").trim(),
+    imageResumeDataUrl: typeof payload.imageResumeDataUrl === "string" ? payload.imageResumeDataUrl : "",
+    imageResumeMimeType: typeof payload.imageResumeMimeType === "string" ? payload.imageResumeMimeType : "",
     pollIntervalMs: clampNumber(Number(payload.pollIntervalMs), 600, 15000, DEFAULT_SETTINGS.pollIntervalMs),
     autoGreet: Boolean(payload.autoGreet),
     autoNext: Boolean(payload.autoNext),
     enabled: payload.enabled !== false
   };
+}
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index);
 }
 
 function clampNumber(value, min, max, fallback) {
