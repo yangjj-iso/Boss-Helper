@@ -267,6 +267,15 @@
       font-weight: 600;
     }
 
+    .provider-group {
+      display: none;
+      gap: 12px;
+    }
+
+    .provider-group.active {
+      display: grid;
+    }
+
     .test-output {
       min-height: 76px;
       padding: 10px 12px;
@@ -530,51 +539,57 @@
             </div>
           </div>
 
-          <div class="grid-two">
-            <div class="field">
-              <label for="doubaoApiKey">豆包 API Key</label>
-              <input id="doubaoApiKey" type="password" placeholder="sk-..." />
+          <div class="provider-group" data-provider="doubao">
+            <div class="grid-two">
+              <div class="field">
+                <label for="doubaoApiKey">豆包 API Key</label>
+                <input id="doubaoApiKey" type="password" placeholder="sk-..." />
+              </div>
+              <div class="field">
+                <label for="doubaoModel">豆包 Model</label>
+                <input id="doubaoModel" type="text" placeholder="填写你的模型ID" />
+              </div>
             </div>
             <div class="field">
-              <label for="doubaoModel">豆包 Model</label>
-              <input id="doubaoModel" type="text" placeholder="填写你的模型ID" />
+              <label for="doubaoEndpoint">豆包 Endpoint</label>
+              <input id="doubaoEndpoint" type="text"
+                placeholder="https://ark.cn-beijing.volces.com/api/v3/chat/completions" />
             </div>
-          </div>
-          <div class="field">
-            <label for="doubaoEndpoint">豆包 Endpoint</label>
-            <input id="doubaoEndpoint" type="text"
-              placeholder="https://ark.cn-beijing.volces.com/api/v3/chat/completions" />
           </div>
 
-          <div class="grid-two">
-            <div class="field">
-              <label for="deepseekApiKey">DeepSeek API Key</label>
-              <input id="deepseekApiKey" type="password" placeholder="sk-..." />
+          <div class="provider-group" data-provider="deepseek">
+            <div class="grid-two">
+              <div class="field">
+                <label for="deepseekApiKey">DeepSeek API Key</label>
+                <input id="deepseekApiKey" type="password" placeholder="sk-..." />
+              </div>
+              <div class="field">
+                <label for="deepseekModel">DeepSeek Model</label>
+                <input id="deepseekModel" type="text" placeholder="deepseek-chat" />
+              </div>
             </div>
             <div class="field">
-              <label for="deepseekModel">DeepSeek Model</label>
-              <input id="deepseekModel" type="text" placeholder="deepseek-chat" />
+              <label for="deepseekEndpoint">DeepSeek Endpoint</label>
+              <input id="deepseekEndpoint" type="text" placeholder="https://api.deepseek.com/chat/completions" />
             </div>
-          </div>
-          <div class="field">
-            <label for="deepseekEndpoint">DeepSeek Endpoint</label>
-            <input id="deepseekEndpoint" type="text" placeholder="https://api.deepseek.com/chat/completions" />
           </div>
 
-          <div class="grid-two">
-            <div class="field">
-              <label for="yuanbaoApiKey">腾讯元宝 API Key</label>
-              <input id="yuanbaoApiKey" type="password" placeholder="sk-..." />
+          <div class="provider-group" data-provider="yuanbao">
+            <div class="grid-two">
+              <div class="field">
+                <label for="yuanbaoApiKey">腾讯元宝 API Key</label>
+                <input id="yuanbaoApiKey" type="password" placeholder="sk-..." />
+              </div>
+              <div class="field">
+                <label for="yuanbaoModel">腾讯元宝 Model</label>
+                <input id="yuanbaoModel" type="text" placeholder="hunyuan-lite" />
+              </div>
             </div>
             <div class="field">
-              <label for="yuanbaoModel">腾讯元宝 Model</label>
-              <input id="yuanbaoModel" type="text" placeholder="hunyuan-lite" />
+              <label for="yuanbaoEndpoint">腾讯元宝 Endpoint</label>
+              <input id="yuanbaoEndpoint" type="text"
+                placeholder="https://api.hunyuan.cloud.tencent.com/v1/chat/completions" />
             </div>
-          </div>
-          <div class="field">
-            <label for="yuanbaoEndpoint">腾讯元宝 Endpoint</label>
-            <input id="yuanbaoEndpoint" type="text"
-              placeholder="https://api.hunyuan.cloud.tencent.com/v1/chat/completions" />
           </div>
 
           <div class="field">

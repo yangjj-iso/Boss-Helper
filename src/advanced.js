@@ -112,6 +112,7 @@ function hydrate(settings) {
   setInputValue(elements.yuanbaoApiKey, settings.yuanbaoApiKey || "");
   setInputValue(elements.yuanbaoEndpoint, settings.yuanbaoEndpoint || DEFAULT_SETTINGS.yuanbaoEndpoint);
   setInputValue(elements.yuanbaoModel, settings.yuanbaoModel || DEFAULT_SETTINGS.yuanbaoModel);
+  updateProviderVisibility();
 }
 
 function bindEvents() {
@@ -207,6 +208,7 @@ async function saveSettings(options = {}) {
 
   try {
     await chrome.storage.local.set(payload);
+    updateProviderVisibility();
     if (!options.silent) {
       setTextValue(elements.saveStatus, `已保存 ${new Date().toLocaleTimeString()}`);
     }
@@ -429,4 +431,13 @@ function getProviderSettingsFromForm() {
     endpoint: getInputValue(elements.deepseekEndpoint) || DEFAULT_SETTINGS.deepseekEndpoint,
     model: getInputValue(elements.deepseekModel) || DEFAULT_SETTINGS.deepseekModel
   };
+}
+
+function updateProviderVisibility() {
+  const selected = getInputValue(elements.autoReplyProvider) || "deepseek";
+  const groups = document.querySelectorAll(".provider-group");
+  for (const group of groups) {
+    const provider = group.dataset.provider || "";
+    group.classList.toggle("active", provider === selected);
+  }
 }
