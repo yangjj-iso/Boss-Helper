@@ -16,9 +16,17 @@
 
     body {
       margin: 0;
-      font-family: Arial, "Microsoft YaHei", sans-serif;
-      background: #f4f8ff;
+      font-family: Inter, Arial, "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top right, rgba(20, 184, 166, 0.12), transparent 32%),
+        linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
       color: #0f172a;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
     }
 
     .page {
@@ -29,35 +37,83 @@
     .panel {
       max-width: 720px;
       margin: 0 auto;
-      background: rgba(255, 255, 255, 0.98);
-      border: 1px solid #e2e8f0;
       border-radius: 20px;
-      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+      background: rgba(255, 255, 255, 0.97);
+      border: 1px solid rgba(203, 213, 225, 0.88);
+      box-shadow: 0 24px 58px rgba(15, 23, 42, 0.12);
       overflow: hidden;
     }
 
     .header {
       padding: 20px 22px 16px;
-      border-bottom: 1px solid #e8eef8;
-      background: linear-gradient(180deg, rgba(248, 251, 255, 0.95) 0%, rgba(255, 255, 255, 0.95) 100%);
+      border-bottom: 1px solid rgba(226, 232, 240, 0.96);
+      background:
+        radial-gradient(circle at top right, rgba(20, 184, 166, 0.12), transparent 34%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
     }
 
-    .header h1 {
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0f766e 0%, #0891b2 100%);
+      color: #fff;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 12px 24px rgba(8, 145, 178, 0.18);
+      flex: 0 0 auto;
+    }
+
+    .logo svg {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .title h1 {
       margin: 0;
       font-size: 22px;
-      color: #3774ee;
+      line-height: 1.2;
     }
 
-    .header p {
+    .title p {
       margin: 6px 0 0;
       font-size: 13px;
+      line-height: 1.5;
       color: #64748b;
     }
 
     .body {
-      padding: 20px 22px 22px;
       display: grid;
       gap: 16px;
+      padding: 20px 22px 22px;
+    }
+
+    .section {
+      display: grid;
+      gap: 12px;
+    }
+
+    .section-head strong {
+      font-size: 14px;
+      color: #0f172a;
+    }
+
+    .grid-two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
     }
 
     .field {
@@ -67,20 +123,21 @@
 
     .field label {
       font-size: 13px;
+      font-weight: 600;
       color: #475569;
     }
 
-    .field textarea,
     .field input,
+    .field textarea,
     .field select {
       width: 100%;
-      border: 1px solid #cbd5e1;
-      border-radius: 14px;
-      background: #fff;
+      border: 1px solid #d7e0ea;
+      border-radius: 13px;
+      background: rgba(255, 255, 255, 0.98);
       color: #0f172a;
       outline: none;
       padding: 12px 14px;
-      font: inherit;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
     }
 
     .field input,
@@ -89,83 +146,239 @@
     }
 
     .field textarea {
-      min-height: 120px;
+      min-height: 136px;
       resize: vertical;
-      line-height: 1.55;
+      line-height: 1.6;
     }
 
-    .field textarea:focus,
+    .field input::placeholder,
+    .field textarea::placeholder {
+      color: #94a3b8;
+    }
+
     .field input:focus,
-    .field select:focus {
-      border-color: #6da4ff;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+    .field textarea:focus,
+    .field select:focus,
+    .button:focus-visible {
+      border-color: #14b8a6;
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.16);
     }
 
     .hint {
       font-size: 12px;
-      color: #7a889d;
+      line-height: 1.5;
+      color: #64748b;
     }
 
-    .toggles {
+    .toggle-grid {
       display: grid;
       gap: 10px;
     }
 
-    .toggle {
+    .media-card {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(226, 232, 240, 0.96);
+      background: rgba(248, 250, 252, 0.92);
+    }
+
+    .media-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .media-copy {
+      display: grid;
+      gap: 4px;
+    }
+
+    .media-copy strong {
+      font-size: 14px;
+      color: #0f172a;
+    }
+
+    .media-copy span {
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    .switch {
+      position: relative;
+      width: 44px;
+      height: 26px;
+      flex: 0 0 auto;
+    }
+
+    .switch input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      margin: 0;
+    }
+
+    .switch-track {
+      width: 100%;
+      height: 100%;
+      border-radius: 999px;
+      background: #dbe4ee;
+      transition: background 0.18s ease;
+    }
+
+    .switch-track::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+      transition: transform 0.18s ease;
+    }
+
+    .switch input:checked+.switch-track {
+      background: linear-gradient(135deg, #0f766e 0%, #0891b2 100%);
+    }
+
+    .switch input:checked+.switch-track::after {
+      transform: translateX(18px);
+    }
+
+    .media-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .ghost-button {
+      height: 40px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(59, 130, 246, 0.38);
+      background: rgba(239, 246, 255, 0.92);
+      color: #2563eb;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .test-output {
+      min-height: 76px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(226, 232, 240, 0.96);
+      background: rgba(248, 250, 252, 0.92);
+      color: #475569;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    .file-name {
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    .activity-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .activity-option {
       display: flex;
       align-items: center;
       gap: 10px;
       min-height: 44px;
       padding: 0 12px;
-      border: 1px solid #e2e8f0;
+      border-radius: 13px;
+      border: 1px solid rgba(226, 232, 240, 0.96);
+      background: rgba(248, 250, 252, 0.92);
+      color: #334155;
+    }
+
+    .activity-option input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: #0f766e;
+      flex: 0 0 auto;
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 52px;
+      padding: 0 14px;
       border-radius: 14px;
-      background: #f8fbff;
+      border: 1px solid rgba(226, 232, 240, 0.96);
+      background: rgba(248, 250, 252, 0.92);
       font-size: 14px;
       color: #334155;
     }
 
+    .toggle input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: #0f766e;
+      flex: 0 0 auto;
+    }
+
     .footer {
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      justify-content: space-between;
       gap: 12px;
-      padding-top: 6px;
+      padding-top: 2px;
     }
 
     .status {
       font-size: 12px;
+      line-height: 1.5;
       color: #64748b;
     }
 
     .button {
-      height: 42px;
+      height: 44px;
       border: 0;
       border-radius: 12px;
       padding: 0 16px;
       cursor: pointer;
-      font: inherit;
-    }
-
-    .button.primary {
-      background: linear-gradient(180deg, #4d8cff 0%, #2f6ae6 100%);
+      background: linear-gradient(135deg, #0f766e 0%, #0891b2 100%);
       color: #fff;
+      font-weight: 700;
+      box-shadow: 0 12px 24px rgba(15, 118, 110, 0.18);
     }
 
-    .button.secondary {
-      background: #e9eff8;
-      color: #334155;
-    }
+    @media (max-width: 640px) {
+      .page {
+        padding: 14px;
+      }
 
-    .test-output {
-      min-height: 72px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: #f8fbff;
-      border: 1px solid #e2e8f0;
-      color: #475569;
-      font-size: 12px;
-      line-height: 1.55;
-      white-space: pre-wrap;
+      .grid-two {
+        grid-template-columns: 1fr;
+      }
+
+      .activity-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .footer {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .button {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -174,129 +387,210 @@
   <main class="page">
     <section class="panel">
       <header class="header">
-        <h1>BOSS海投助手</h1>
-        <p>高级选项</p>
+        <div class="header-top">
+          <div class="logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M8 7V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1"></path>
+              <rect x="4" y="7" width="16" height="11" rx="3"></rect>
+              <path d="M4 12h16"></path>
+              <path d="M10 12v2"></path>
+              <path d="M14 12v2"></path>
+            </svg>
+          </div>
+          <div class="title">
+            <h1>BOSS海投助手</h1>
+            <p>高级选项</p>
+          </div>
+        </div>
       </header>
       <section class="body">
-        <div class="field">
-          <label for="salaryKeywords">薪资包含（可选）</label>
-          <input id="salaryKeywords" type="text" placeholder="20K, 25-35K" />
-        </div>
+        <section class="section">
+          <div class="section-head">
+            <strong>筛选</strong>
+          </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="salaryKeywords">薪资</label>
+              <input id="salaryKeywords" type="text" placeholder="20K, 25-35K" />
+            </div>
+            <div class="field">
+              <label for="companyKeywords">公司</label>
+              <input id="companyKeywords" type="text" placeholder="字节, 腾讯, 外企" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="excludeCompanyKeywords">排除公司</label>
+            <input id="excludeCompanyKeywords" type="text" placeholder="培训, 外包, 猎头" />
+          </div>
+        </section>
 
-        <div class="field">
-          <label for="companyKeywords">公司名包含（可选）</label>
-          <input id="companyKeywords" type="text" placeholder="字节, 腾讯, 外企" />
-        </div>
+        <section class="section">
+          <div class="section-head">
+            <strong>图片简历</strong>
+          </div>
+          <div class="media-card">
+            <div class="media-row">
+              <div class="media-copy">
+                <strong>发送图片简历</strong>
+                <span>JPG</span>
+              </div>
+              <label class="switch" aria-label="发送图片简历">
+                <input id="sendImageResume" type="checkbox" />
+                <span class="switch-track"></span>
+              </label>
+            </div>
+            <div class="media-actions">
+              <button class="ghost-button" type="button" id="imageResumeButton">添加图片简历</button>
+              <span class="file-name" id="imageResumeName">未选择</span>
+            </div>
+            <input id="imageResumeInput" type="file" accept=".jpg,.jpeg,image/jpeg" hidden />
+          </div>
+        </section>
 
-        <div class="field">
-          <label for="greetTemplate">打招呼语模板</label>
-          <textarea id="greetTemplate" placeholder="支持 {jobTitle} {companyName} {location} {salary}"></textarea>
-          <div class="hint">支持变量：{jobTitle} {companyName} {location} {salary}</div>
-        </div>
+        <section class="section">
+          <div class="section-head">
+            <strong>招聘者状态</strong>
+          </div>
+          <div class="activity-grid">
+            <label class="activity-option"><input type="checkbox" data-activity-option="在线" /> 在线</label>
+            <label class="activity-option"><input type="checkbox" data-activity-option="刚刚活跃" /> 刚刚活跃</label>
+            <label class="activity-option"><input type="checkbox" data-activity-option="今日活跃" /> 今日活跃</label>
+            <label class="activity-option"><input type="checkbox" data-activity-option="3日内活跃" /> 3日内活跃</label>
+            <label class="activity-option"><input type="checkbox" data-activity-option="本周活跃" /> 本周活跃</label>
+          </div>
+        </section>
 
-        <div class="field">
-          <label for="pollIntervalMs">轮询间隔(ms)</label>
-          <input id="pollIntervalMs" type="number" min="600" step="100" />
-        </div>
+        <section class="section">
+          <div class="section-head">
+            <strong>招呼语</strong>
+          </div>
+          <div class="field">
+            <label for="greetTemplate">打招呼语模板</label>
+            <textarea id="greetTemplate" placeholder="支持 {jobTitle} {companyName} {location} {salary}"></textarea>
+            <div class="hint">支持变量：{jobTitle} {companyName} {location} {salary}</div>
+          </div>
+        </section>
 
-        <div class="toggles">
-          <label class="toggle"><input id="autoGreet" type="checkbox" /> 自动打招呼</label>
-          <label class="toggle"><input id="autoNext" type="checkbox" /> 自动切下一个</label>
-        </div>
+        <section class="section">
+          <div class="section-head">
+            <strong>运行</strong>
+          </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="pollIntervalMs">间隔(ms)</label>
+              <input id="pollIntervalMs" type="number" min="600" step="100" />
+            </div>
+          </div>
+          <div class="toggle-grid">
+            <label class="toggle">
+              <span>自动打招呼</span>
+              <input id="autoGreet" type="checkbox" />
+            </label>
+            <label class="toggle">
+              <span>自动切下一个</span>
+              <input id="autoNext" type="checkbox" />
+            </label>
+          </div>
+        </section>
 
-        <div class="field">
-          <label for="autoReplyEnabled">自动回复开关</label>
-          <div class="toggles">
-            <label class="toggle"><input id="autoReplyEnabled" type="checkbox" /> 自动回复聊天</label>
+        <section class="section">
+          <div class="section-head">
+            <strong>自动回复</strong>
+          </div>
+          <div class="toggle-grid">
+            <label class="toggle">
+              <span>自动回复聊天</span>
+              <input id="autoReplyEnabled" type="checkbox" />
+            </label>
           </div>
           <div class="hint">仅在聊天输入框可见时生效，建议谨慎开启。</div>
-        </div>
 
-        <div class="field">
-          <label for="autoReplyProvider">自动回复服务商</label>
-          <select id="autoReplyProvider">
-            <option value="doubao">豆包(字节)</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="yuanbao">腾讯元宝/混元</option>
-          </select>
-        </div>
+          <div class="field">
+            <label for="autoReplyProvider">服务商</label>
+            <select id="autoReplyProvider">
+              <option value="doubao">豆包(字节)</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="yuanbao">腾讯元宝/混元</option>
+            </select>
+          </div>
 
-        <div class="field">
-          <label for="autoReplySystemPrompt">自动回复提示词</label>
-          <textarea id="autoReplySystemPrompt" placeholder="定义你的回复风格、重点信息等"></textarea>
-        </div>
+          <div class="field">
+            <label for="autoReplySystemPrompt">提示词</label>
+            <textarea id="autoReplySystemPrompt" placeholder="定义你的回复风格、重点信息等"></textarea>
+          </div>
 
-        <div class="field">
-          <label for="autoReplyTemperature">回复随机度(0-1)</label>
-          <input id="autoReplyTemperature" type="number" min="0" max="1" step="0.1" />
-        </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="autoReplyTemperature">随机度(0-1)</label>
+              <input id="autoReplyTemperature" type="number" min="0" max="1" step="0.1" />
+            </div>
+            <div class="field">
+              <label for="autoReplyMaxTokens">回复长度上限</label>
+              <input id="autoReplyMaxTokens" type="number" min="64" max="4096" step="64" />
+            </div>
+          </div>
 
-        <div class="field">
-          <label for="autoReplyMaxTokens">回复长度上限</label>
-          <input id="autoReplyMaxTokens" type="number" min="64" max="4096" step="64" />
-        </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="doubaoApiKey">豆包 API Key</label>
+              <input id="doubaoApiKey" type="password" placeholder="sk-..." />
+            </div>
+            <div class="field">
+              <label for="doubaoModel">豆包 Model</label>
+              <input id="doubaoModel" type="text" placeholder="填写你的模型ID" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="doubaoEndpoint">豆包 Endpoint</label>
+            <input id="doubaoEndpoint" type="text"
+              placeholder="https://ark.cn-beijing.volces.com/api/v3/chat/completions" />
+          </div>
 
-        <div class="field">
-          <label for="doubaoApiKey">豆包 API Key</label>
-          <input id="doubaoApiKey" type="password" placeholder="sk-..." />
-        </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="deepseekApiKey">DeepSeek API Key</label>
+              <input id="deepseekApiKey" type="password" placeholder="sk-..." />
+            </div>
+            <div class="field">
+              <label for="deepseekModel">DeepSeek Model</label>
+              <input id="deepseekModel" type="text" placeholder="deepseek-chat" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="deepseekEndpoint">DeepSeek Endpoint</label>
+            <input id="deepseekEndpoint" type="text" placeholder="https://api.deepseek.com/chat/completions" />
+          </div>
 
-        <div class="field">
-          <label for="doubaoEndpoint">豆包 Endpoint</label>
-          <input id="doubaoEndpoint" type="text"
-            placeholder="https://ark.cn-beijing.volces.com/api/v3/chat/completions" />
-        </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="yuanbaoApiKey">腾讯元宝 API Key</label>
+              <input id="yuanbaoApiKey" type="password" placeholder="sk-..." />
+            </div>
+            <div class="field">
+              <label for="yuanbaoModel">腾讯元宝 Model</label>
+              <input id="yuanbaoModel" type="text" placeholder="hunyuan-lite" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="yuanbaoEndpoint">腾讯元宝 Endpoint</label>
+            <input id="yuanbaoEndpoint" type="text"
+              placeholder="https://api.hunyuan.cloud.tencent.com/v1/chat/completions" />
+          </div>
 
-        <div class="field">
-          <label for="doubaoModel">豆包 Model</label>
-          <input id="doubaoModel" type="text" placeholder="填写你的模型ID" />
-        </div>
-
-        <div class="field">
-          <label for="deepseekApiKey">DeepSeek API Key</label>
-          <input id="deepseekApiKey" type="password" placeholder="sk-..." />
-        </div>
-
-        <div class="field">
-          <label for="deepseekEndpoint">DeepSeek Endpoint</label>
-          <input id="deepseekEndpoint" type="text" placeholder="https://api.deepseek.com/chat/completions" />
-        </div>
-
-        <div class="field">
-          <label for="deepseekModel">DeepSeek Model</label>
-          <input id="deepseekModel" type="text" placeholder="deepseek-chat" />
-        </div>
-
-        <div class="field">
-          <label for="yuanbaoApiKey">腾讯元宝 API Key</label>
-          <input id="yuanbaoApiKey" type="password" placeholder="sk-..." />
-        </div>
-
-        <div class="field">
-          <label for="yuanbaoEndpoint">腾讯元宝 Endpoint</label>
-          <input id="yuanbaoEndpoint" type="text"
-            placeholder="https://api.hunyuan.cloud.tencent.com/v1/chat/completions" />
-        </div>
-
-        <div class="field">
-          <label for="yuanbaoModel">腾讯元宝 Model</label>
-          <input id="yuanbaoModel" type="text" placeholder="hunyuan-lite" />
-        </div>
-
-        <div class="field">
-          <label for="autoReplyTestInput">自动回复测试内容</label>
-          <textarea id="autoReplyTestInput" placeholder="输入一段测试对话，如：你好方便发份简历过来吗"></textarea>
-          <div class="hint">点击测试不会发送到聊天框，仅验证 API 是否可用。</div>
-        </div>
-
-        <div class="field">
-          <button class="button secondary" type="button" id="autoReplyTestButton">测试自动回复</button>
-          <div class="test-output" id="autoReplyTestResult">等待测试。</div>
-        </div>
+          <div class="field">
+            <label for="autoReplyTestInput">自动回复测试内容</label>
+            <textarea id="autoReplyTestInput" placeholder="输入一段测试对话，如：你好方便发份简历过来吗"></textarea>
+            <div class="hint">点击测试不会发送到聊天框，仅验证 API 是否可用。</div>
+          </div>
+          <div class="field">
+            <button class="ghost-button" type="button" id="autoReplyTestButton">测试自动回复</button>
+            <div class="test-output" id="autoReplyTestResult">等待测试。</div>
+          </div>
+        </section>
 
         <div class="footer">
           <div class="status" id="saveStatus">设置会自动保存</div>
-          <button class="button primary" type="button" id="closeButton">关闭窗口</button>
+          <button class="button" type="button" id="closeButton">关闭窗口</button>
         </div>
       </section>
     </section>

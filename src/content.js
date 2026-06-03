@@ -2,33 +2,38 @@ const HOST_ID = "boss-helper-root";
 const PANEL_POSITION_KEY = "boss-helper:panel-position";
 const MAX_LOGS = 200;
 const MAX_JOB_RETRIES = 2;
-const AUTO_REPLY_POLL_MS = 1400;
-const AUTO_REPLY_MIN_INTERVAL = 6000;
+const COMMUNICATION_LIMIT_HINTS = [
+  "无法进行沟通",
+  "150位boss沟通",
+  "150位BOSS沟通",
+  "休息一下",
+  "明天再来"
+];
+
+const RECRUITER_ACTIVITY_OPTIONS = [
+  "在线",
+  "刚刚活跃",
+  "今日活跃",
+  "3日内活跃",
+  "本周活跃"
+];
 
 const DEFAULT_SETTINGS = {
   jobKeywords: "",
   locationKeywords: "",
   salaryKeywords: "",
   companyKeywords: "",
+  excludeCompanyKeywords: "",
+  recruiterActiveStatuses: [],
   greetTemplate: "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+  sendImageResume: false,
+  imageResumeFileName: "",
+  imageResumeDataUrl: "",
+  imageResumeMimeType: "",
   autoGreet: true,
   autoNext: true,
   enabled: true,
-  pollIntervalMs: 1800,
-  autoReplyEnabled: false,
-  autoReplyProvider: "deepseek",
-  autoReplySystemPrompt: "你是求职者，正在和BOSS直聘上的招聘负责人沟通。请用简洁礼貌的中文回复，并在必要时追问关键信息。",
-  autoReplyTemperature: 0.6,
-  autoReplyMaxTokens: 512,
-  doubaoApiKey: "",
-  deepseekApiKey: "",
-  yuanbaoApiKey: "",
-  doubaoEndpoint: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-  deepseekEndpoint: "https://api.deepseek.com/chat/completions",
-  yuanbaoEndpoint: "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
-  doubaoModel: "",
-  deepseekModel: "deepseek-chat",
-  yuanbaoModel: "hunyuan-lite"
+  pollIntervalMs: 1800
 };
 
 const SELECTORS = {
@@ -143,13 +148,21 @@ const SELECTORS = {
     ".send-btn",
     "button[type='submit']"
   ],
-  chatMessages: [
-    ".chat-message",
-    ".msg-item",
-    ".message-item",
-    "[class*='chat-msg']",
-    "[class*='msg-item']",
-    "[class*='message']"
+  imageResumeInput: [
+    ".chat-op input[type='file']",
+    ".chat-tools input[type='file']",
+    ".upload input[type='file']",
+    "input[type='file'][accept*='image']",
+    "input[type='file']"
+  ],
+  imageResumeTriggers: [
+    ".chat-op button",
+    ".chat-tools button",
+    ".upload button",
+    "button",
+    "label",
+    "span",
+    "a"
   ]
 };
 
@@ -160,7 +173,6 @@ const state = {
   preloading: false,
   observer: null,
   loopTimer: null,
-  autoReplyTimer: null,
   shadowRoot: null,
   host: null,
   visitedJobs: new Set(),
@@ -170,19 +182,18 @@ const state = {
   selectedJobIndex: -1,
   currentJob: null,
   lastGreetingPreview: "",
-  lastAutoReplySignature: "",
-  lastAutoReplyAt: 0,
-  autoReplyInFlight: false,
   panelMinimized: false,
   logs: [],
-  startButtonLocked: false
+  startButtonLocked: false,
+  fullListReadComplete: false
 };
 
 const ACTION_RESULT = {
   greeted: "greeted",
   delivered: "delivered",
   pending: "pending",
-  failed: "failed"
+  failed: "failed",
+  paused: "paused"
 };
 
 const JOB_PAGE_HINTS = [
@@ -207,7 +218,6 @@ async function bootstrap() {
     logEvent("初始化", "扩展已注入页面。");
     refreshPageSnapshot("初始化完成");
     installObservers();
-    startAutoReplyLoop();
     syncButtonState();
   } catch (error) {
     console.error("[boss-helper] bootstrap failed", error);
@@ -248,84 +258,304 @@ function buildStyles() {
     :host { all: initial; }
     * { box-sizing: border-box; font-family: Inter, Arial, "Microsoft YaHei", sans-serif; }
     button, input, textarea { font: inherit; }
-    .panel { width: 408px; max-height: calc(100vh - 40px); border-radius: 20px; background: rgba(255,255,255,0.97); box-shadow: 0 24px 60px rgba(15,23,42,0.2); border: 1px solid rgba(226,232,240,0.95); color: #0f172a; overflow: hidden; display: flex; flex-direction: column; backdrop-filter: blur(12px); }
-    .panel.minimized { width: 240px; }
-    .header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid #e8eef8; background:linear-gradient(180deg, rgba(248,251,255,0.95) 0%, rgba(255,255,255,0.95) 100%); cursor:move; user-select:none; }
-    .brand { display:flex; align-items:center; gap:12px; min-width:0; }
-    .logo { width:44px; height:44px; border-radius:14px; display:inline-flex; align-items:center; justify-content:center; font-size:20px; background:linear-gradient(180deg, #5b8def 0%, #2f6ae6 100%); color:#fff; flex:0 0 auto; }
-    .title strong { display:block; font-size:17px; font-weight:700; color:#3774ee; white-space:nowrap; }
-    .subtitle { margin-top:2px; font-size:12px; color:#6b7a90; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .tools { display:flex; gap:6px; flex:0 0 auto; }
-    .icon-btn { width:30px; height:30px; border:0; border-radius:50%; background:transparent; color:#64748b; cursor:pointer; font-size:18px; }
-    .icon-btn:hover { background:#eef4ff; color:#2563eb; }
-    .body { display:flex; flex-direction:column; min-height:0; overflow:auto; background:linear-gradient(180deg, #f7fbff 0%, #fff 180px); }
-    .panel.minimized .body { display:none; }
-    .section { padding:14px 16px; }
-    .surface { border-radius:18px; background:rgba(255,255,255,0.88); border:1px solid #dfe9f8; box-shadow:0 8px 24px rgba(37,99,235,0.06); }
-    .form { padding:14px; }
-    .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-    .field { display:flex; flex-direction:column; gap:6px; min-width:0; }
-    .field.span-2 { grid-column:1 / -1; }
-    .field label { font-size:12px; color:#4b5a71; }
-    .field input, .field textarea { width:100%; border-radius:14px; border:1px solid #c9d7ea; background:#fff; padding:10px 14px; font-size:14px; color:#0f172a; outline:none; }
-    .field input { height:42px; }
-    .field textarea { min-height:76px; resize:vertical; line-height:1.5; }
-    .field input:focus, .field textarea:focus { border-color:#6da4ff; box-shadow:0 0 0 3px rgba(59,130,246,0.14); }
-    .hint { font-size:11px; color:#7a889d; }
-    .subtle-note {
-      margin-top: 10px;
+    button { appearance: none; -webkit-appearance: none; }
+    .panel {
+      width: 404px;
+      max-height: calc(100vh - 36px);
+      border-radius: 18px;
+      background: rgba(248, 250, 252, 0.96);
+      border: 1px solid rgba(203, 213, 225, 0.86);
+      box-shadow: 0 26px 58px rgba(15, 23, 42, 0.18);
+      color: #0f172a;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      backdrop-filter: blur(14px);
+    }
+    .panel.minimized {
+      width: 248px;
+    }
+    .header {
+      padding: 16px;
+      background:
+        radial-gradient(circle at top right, rgba(20, 184, 166, 0.12), transparent 34%),
+        linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(247,250,252,0.96) 100%);
+      border-bottom: 1px solid rgba(226, 232, 240, 0.92);
+      cursor: move;
+      user-select: none;
+    }
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0f766e 0%, #0891b2 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), 0 12px 24px rgba(8,145,178,0.22);
+      color: #fff;
+      flex: 0 0 auto;
+    }
+    .logo svg {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .title {
+      min-width: 0;
+    }
+    .title strong {
+      display: block;
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .subtitle {
+      margin-top: 4px;
       font-size: 12px;
-      color: #7a889d;
-      line-height: 1.5;
+      line-height: 1.4;
+      color: #64748b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .icon-btn.active {
-      background:#eef4ff;
-      color:#2563eb;
-    }
-    .toggles { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
-    .toggle { display:flex; align-items:center; gap:8px; min-height:36px; border-radius:12px; padding:0 10px; background:#f8fbff; color:#334155; font-size:13px; }
-    .actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
-    .button { height:46px; border:0; border-radius:14px; font-size:16px; font-weight:600; cursor:pointer; transition: opacity 0.18s ease; }
-    .button:disabled { cursor:not-allowed; opacity:0.58; }
-    .button.primary { background:linear-gradient(180deg, #4d8cff 0%, #2f6ae6 100%); color:#fff; box-shadow:0 12px 24px rgba(47,106,230,0.28); }
-    .button.secondary { background:#e9eff8; color:#334155; }
-    .stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
-    .stat { border-radius:16px; background:rgba(255,255,255,0.86); border:1px solid #e7eef8; padding:14px 10px; text-align:center; }
-    .stat strong { display:block; font-size:18px; font-weight:700; color:#0f172a; }
-    .stat span { display:block; margin-top:4px; font-size:12px; color:#74839a; }
-    .log-card {
-      margin-top: 12px;
-      border-radius: 16px;
+    .tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px;
+      border: 1px solid rgba(226, 232, 240, 0.92);
+      border-radius: 14px;
       background: rgba(255,255,255,0.9);
-      border: 1px solid #e7eef8;
-      padding: 12px 14px;
+      box-shadow: 0 6px 18px rgba(15,23,42,0.04);
+      flex: 0 0 auto;
+    }
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: #64748b;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+    }
+    .icon-btn svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .icon-btn:hover {
+      background: rgba(241, 245, 249, 0.98);
+      color: #0f172a;
+      transform: translateY(-1px);
+    }
+    .icon-btn:focus-visible,
+    .button:focus-visible,
+    .field input:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.18);
+    }
+    .icon-btn[data-action="close"]:hover {
+      background: rgba(254, 226, 226, 0.96);
+      color: #dc2626;
+    }
+    .body {
+      display: grid;
+      gap: 14px;
+      min-height: 0;
+      overflow: auto;
+      padding: 16px;
+      background: linear-gradient(180deg, rgba(248,250,252,0.98) 0%, rgba(241,245,249,0.98) 100%);
+    }
+    .panel.minimized .subtitle,
+    .panel.minimized .body {
+      display: none;
+    }
+    .panel.minimized .title {
+      display: none;
+    }
+    .panel.minimized .header {
+      padding: 12px;
+    }
+    .form-area {
+      display: grid;
+      gap: 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-width: 0;
+    }
+    .field label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #475569;
+    }
+    .field input {
+      width: 100%;
+      height: 44px;
+      border-radius: 12px;
+      border: 1px solid #d7e0ea;
+      background: rgba(255,255,255,0.96);
+      padding: 0 14px;
+      font-size: 14px;
+      color: #0f172a;
+      outline: none;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    }
+    .field input::placeholder {
+      color: #94a3b8;
+    }
+    .field input:focus {
+      border-color: #14b8a6;
+      background: #fff;
+    }
+    .helper-strip {
+      padding: 11px 12px;
+      border-radius: 13px;
+      background: rgba(255,255,255,0.82);
+      border: 1px solid rgba(226, 232, 240, 0.92);
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: 1.3fr 0.9fr;
+      gap: 10px;
+    }
+    .button {
+      height: 46px;
+      border: 0;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    }
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: 0.56;
+      transform: none;
+      box-shadow: none;
+    }
+    .button:not(:disabled):hover {
+      transform: translateY(-1px);
+    }
+    .button.primary {
+      background: linear-gradient(135deg, #0f766e 0%, #0891b2 100%);
+      color: #fff;
+      box-shadow: 0 14px 26px rgba(15,118,110,0.22);
+    }
+    .button.secondary {
+      background: rgba(255,255,255,0.94);
+      color: #334155;
+      border: 1px solid rgba(203, 213, 225, 0.96);
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .stat {
+      padding: 12px 10px;
+      border-radius: 13px;
+      background: rgba(255,255,255,0.76);
+      border: 1px solid rgba(226, 232, 240, 0.92);
+      text-align: center;
+    }
+    .stat strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .stat span {
+      display: block;
+      margin-top: 6px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .log-card {
+      border-radius: 15px;
+      background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+      border: 1px solid rgba(30, 41, 59, 0.92);
+      padding: 12px 13px;
+      color: #dbeafe;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
     }
     .log-card-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      font-size: 13px;
-      color: #506077;
       margin-bottom: 8px;
+      font-size: 13px;
+      color: #cbd5e1;
     }
     .log-card-count {
-      color: #2563eb;
-      font-size: 12px;
-      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.22);
+      color: #99f6e4;
+      font-size: 11px;
+      font-weight: 700;
     }
     .log-card-body {
-      min-height: 72px;
-      max-height: 220px;
+      min-height: 88px;
+      max-height: 224px;
       overflow: auto;
       white-space: pre-wrap;
       font-size: 12px;
-      line-height: 1.55;
-      color: #475569;
+      line-height: 1.62;
+      color: #cbd5e1;
     }
-    .section-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; font-size:13px; color:#506077; }
-    .pill { display:inline-flex; align-items:center; height:22px; padding:0 9px; border-radius:999px; background:#edf4ff; color:#316fe7; font-size:11px; font-weight:600; }
-    .footer { padding:12px 16px 16px; border-top:1px solid #e8eef8; background:rgba(255,255,255,0.95); font-size:12px; color:#90a0b7; text-align:center; }
+    .footer {
+      padding: 2px 2px 0;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #94a3b8;
+      text-align: center;
+    }
   `;
   return style;
 }
@@ -335,49 +565,76 @@ function buildPanel() {
   wrapper.className = "panel";
   wrapper.innerHTML = `
     <div class="header" data-drag-handle="true">
-      <div class="brand">
-        <div class="logo">⚓</div>
-        <div class="title">
-          <strong>BOSS海投助手</strong>
-          <div class="subtitle">自动筛选 · 自动沟通 · 页面内悬浮</div>
+      <div class="header-top">
+        <div class="brand">
+          <div class="logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M8 7V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1"></path>
+              <rect x="4" y="7" width="16" height="11" rx="3"></rect>
+              <path d="M4 12h16"></path>
+              <path d="M10 12v2"></path>
+              <path d="M14 12v2"></path>
+            </svg>
+          </div>
+          <div class="title">
+            <strong>BOSS海投助手</strong>
+            <div class="subtitle">页面内悬浮</div>
+          </div>
         </div>
-      </div>
-      <div class="tools">
-        <button class="icon-btn" type="button" data-action="advanced" title="高级选项">⚙</button>
-        <button class="icon-btn" type="button" data-action="minimize" title="最小化">-</button>
-        <button class="icon-btn" type="button" data-action="refresh" title="刷新">↻</button>
-        <button class="icon-btn" type="button" data-action="close" title="关闭">×</button>
+        <div class="tools">
+          <button class="icon-btn" type="button" data-action="advanced" title="高级选项" aria-label="高级选项">
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.7 1.7 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.82-.33 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .33-1.82 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.82.33h.01A1.7 1.7 0 0 0 10.03 3H10a2 2 0 1 1 4 0h.03a1.7 1.7 0 0 0 1.56 1.03h.01a1.7 1.7 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.33 1.82v.01A1.7 1.7 0 0 0 21 10.03V10a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z"></path>
+            </svg>
+          </button>
+          <button class="icon-btn" type="button" data-action="minimize" title="最小化" aria-label="最小化">
+            <svg viewBox="0 0 24 24">
+              <path d="M6 12h12"></path>
+            </svg>
+          </button>
+          <button class="icon-btn" type="button" data-action="refresh" title="刷新" aria-label="刷新">
+            <svg viewBox="0 0 24 24">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+              <path d="M21 3v6h-6"></path>
+            </svg>
+          </button>
+          <button class="icon-btn" type="button" data-action="close" title="关闭" aria-label="关闭">
+            <svg viewBox="0 0 24 24">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
     <div class="body">
-      <div class="section">
-        <div class="surface form">
-          <div class="grid">
-            <div class="field"><label for="jobKeywords">职位名包含</label><input id="jobKeywords" placeholder="后端, Java, Go" /></div>
-            <div class="field"><label for="locationKeywords">工作地包含</label><input id="locationKeywords" placeholder="上海, 浦东, 远程" /></div>
-          </div>
-          <div class="subtle-note">点击开始海投后，会先自动滑动到列表底部，读取完整职位信息。薪资、公司、招呼语模板等可选项已移到右上角高级设置。</div>
-          <div class="actions">
-            <button class="button primary" type="button" id="startButton" data-action="start">启动海投</button>
-            <button class="button secondary" type="button" id="stopButton" data-action="stop">暂停</button>
-          </div>
+      <section class="form-area">
+        <div class="grid">
+          <div class="field"><label for="jobKeywords">职位关键词</label><input id="jobKeywords" placeholder="后端, Java, Go" /></div>
+          <div class="field"><label for="locationKeywords">工作地点</label><input id="locationKeywords" placeholder="上海, 浦东, 远程" /></div>
         </div>
-      </div>
-      <div class="section">
+        <div class="helper-strip">开始前会先读完整个职位列表。</div>
+        <div class="actions">
+          <button class="button primary" type="button" id="startButton" data-action="start">开始海投</button>
+          <button class="button secondary" type="button" id="stopButton" data-action="stop">暂停</button>
+        </div>
+      </section>
+      <section>
         <div class="stats">
           <div class="stat"><strong id="jobCount">0</strong><span>列表职位</span></div>
           <div class="stat"><strong id="matchCount">0</strong><span>全条件命中</span></div>
           <div class="stat"><strong id="visitedCount">0</strong><span>已处理</span></div>
         </div>
-        <div class="log-card">
-          <div class="log-card-header">
-            <span>运行日志</span>
-            <span class="log-card-count" id="logCount">0 条</span>
-          </div>
-          <div class="log-card-body" id="logCardBody">暂无日志。</div>
+      </section>
+      <section class="log-card">
+        <div class="log-card-header">
+          <span>运行日志</span>
+          <span class="log-card-count" id="logCount">0 条</span>
         </div>
-      </div>
-      <div class="footer">当前仅对 BOSS 页面生效，刷新或切页后会自动重连</div>
+        <div class="log-card-body" id="logCardBody">暂无日志。</div>
+      </section>
+      <div class="footer">仅在职位页生效</div>
     </div>
   `;
   return wrapper;
@@ -529,17 +786,11 @@ function installObservers() {
   window.addEventListener("hashchange", handleUrlMaybeChanged);
 }
 
-function startAutoReplyLoop() {
-  clearInterval(state.autoReplyTimer);
-  state.autoReplyTimer = setInterval(() => {
-    void tryAutoReply();
-  }, AUTO_REPLY_POLL_MS);
-}
-
 function handleUrlMaybeChanged() {
   state.visitedJobs.clear();
   state.skippedJobs.clear();
   state.failedJobAttempts.clear();
+  state.fullListReadComplete = false;
   logEvent("路由变化", "页面地址变化，已清空已处理列表。");
   refreshPageSnapshot("检测到页面路由变化");
 }
@@ -549,6 +800,9 @@ let refreshTimer = null;
 function debounceRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
+    if (state.running && pauseForCommunicationLimit("页面内容更新")) {
+      return;
+    }
     refreshPageSnapshot("页面内容更新");
   }, 260);
 }
@@ -657,7 +911,12 @@ function parseJobCard(element, index) {
     findLocationLikeText(element)
   ]);
 
-  const matchDetails = getJobMatchDetails({ title, company, salary, location });
+  const recruiterStatus = firstNonEmpty([
+    findRecruiterActivityLikeText(element),
+    extractRecruiterActivityFromText(element.textContent)
+  ]);
+
+  const matchDetails = getJobMatchDetails({ title, company, salary, location, recruiterStatus });
 
   return {
     key: buildJobKey({ title, company, salary, location, index }),
@@ -665,6 +924,7 @@ function parseJobCard(element, index) {
     company,
     salary,
     location,
+    recruiterStatus,
     fullText: normalizeText(element.textContent),
     matches: matchDetails.matches,
     matchDetails,
@@ -676,7 +936,7 @@ function parseJobCard(element, index) {
 
 function looksLikeDetailPollution(job) {
   const text = `${job.title} ${job.company} ${job.location} ${job.salary}`;
-  return /职位描述|查看更多信息|人力经纪人|刚刚活跃/.test(text);
+  return /职位描述|查看更多信息|人力经纪人/.test(text);
 }
 
 function findJobListContainer() {
@@ -718,6 +978,7 @@ function collectCurrentJobFromList(jobs) {
       company: activeJob.company,
       salary: activeJob.salary,
       location: activeJob.location,
+      recruiterStatus: activeJob.recruiterStatus,
       tags: [],
       description: ""
     };
@@ -739,12 +1000,18 @@ function collectCurrentDetail(jobs) {
   }
 
   const exactJob = jobs.find((job) => sameMeaningfulText(job.title, title) || sameMeaningfulText(job.company, company));
+  const recruiterStatus = firstNonEmpty([
+    exactJob?.recruiterStatus,
+    extractRecruiterActivityFromText(tags.join(" ")),
+    extractRecruiterActivityFromText(description)
+  ]);
   return {
     key: exactJob?.key || buildJobKey({ title, company, salary, location, index: 0 }),
     title,
     company,
     salary,
     location,
+    recruiterStatus,
     tags,
     description
   };
@@ -752,8 +1019,9 @@ function collectCurrentDetail(jobs) {
 
 function renderSnapshot(snapshot, reason) {
   const matchedCount = snapshot.jobs.filter((job) => job.matches).length;
-  setText("jobCount", String(snapshot.jobs.length));
-  setText("matchCount", String(matchedCount));
+  const showKnownCounts = state.fullListReadComplete || state.preloading || state.running;
+  setText("jobCount", showKnownCounts ? String(snapshot.jobs.length) : "未知");
+  setText("matchCount", showKnownCounts ? String(matchedCount) : "未知");
   setText("visitedCount", String(state.visitedJobs.size));
   renderLogCard();
   syncButtonState(snapshot);
@@ -817,6 +1085,7 @@ async function startAutomation() {
   }
 
   state.startButtonLocked = true;
+  state.fullListReadComplete = false;
   state.skippedJobs.clear();
   state.failedJobAttempts.clear();
   syncButtonState(snapshot);
@@ -825,6 +1094,12 @@ async function startAutomation() {
     await persistSettingsFromForm();
     await preloadFullJobList();
     snapshot = collectPageSnapshot();
+
+    if (detectCommunicationLimitModal()) {
+      logEvent("启动失败", "检测到“无法进行沟通”提示，今天的沟通额度可能已用完，请明天再试。");
+      refreshPageSnapshot("启动失败：沟通额度已达上限");
+      return;
+    }
 
     if (!snapshot.jobs.length) {
       logEvent("启动失败", "已经滑动到底，但仍未识别到职位列表。");
@@ -852,19 +1127,29 @@ async function startAutomation() {
   }
 }
 
-function stopAutomation() {
+function stopAutomation(options = {}) {
+  const {
+    runtimeStatus = "paused",
+    logType = "已暂停",
+    logMessage = "自动海投已暂停。",
+    refreshReason = "手动暂停"
+  } = options;
+
   if (!state.running) {
-    return;
+    return false;
   }
   state.running = false;
   state.processing = false;
   clearTimeout(state.loopTimer);
   void chrome.runtime.sendMessage({
     type: "boss-helper:update-runtime",
-    payload: { lastStatus: "paused" }
+    payload: { lastStatus: runtimeStatus }
   });
-  logEvent("已暂停", "自动海投已暂停。");
-  refreshPageSnapshot("手动暂停");
+  if (logType && logMessage) {
+    logEvent(logType, logMessage);
+  }
+  refreshPageSnapshot(refreshReason);
+  return true;
 }
 
 function restartAutomationLoop() {
@@ -888,6 +1173,10 @@ async function automationTick() {
   syncButtonState();
 
   try {
+    if (pauseForCommunicationLimit("轮询开始")) {
+      return;
+    }
+
     const snapshot = collectPageSnapshot();
     const nextJob = snapshot.jobs.find((job) => {
       return job.matches && !state.visitedJobs.has(job.key) && !state.skippedJobs.has(job.key);
@@ -903,8 +1192,14 @@ async function automationTick() {
 
     logEvent("选中职位", `${nextJob.title || "未识别职位"} / ${nextJob.company || "-"}`);
     await focusJob(nextJob);
+    if (!state.running) {
+      return;
+    }
     refreshPageSnapshot("已点击职位卡片");
     await wait(1000);
+    if (!state.running || pauseForCommunicationLimit("切换职位后")) {
+      return;
+    }
 
     let actionResult = {
       status: ACTION_RESULT.pending,
@@ -918,7 +1213,14 @@ async function automationTick() {
         message: "已关闭自动打招呼，仅切换职位。"
       };
     }
-    logEvent("执行动作", actionResult.message);
+    if (actionResult.message) {
+      logEvent("执行动作", actionResult.message);
+    }
+
+    if (actionResult.status === ACTION_RESULT.paused) {
+      refreshPageSnapshot("检测到沟通上限");
+      return;
+    }
 
     if (actionResult.status === ACTION_RESULT.greeted || actionResult.status === ACTION_RESULT.delivered) {
       state.visitedJobs.add(nextJob.key);
@@ -960,6 +1262,10 @@ async function focusJob(job) {
 }
 
 async function tryPrimaryAction(job) {
+  if (pauseForCommunicationLimit("执行沟通前")) {
+    return buildPausedActionResult();
+  }
+
   const detailRoot = findRootBySelectors(SELECTORS.detailContainers) || document;
   const greetButton = findClickable(SELECTORS.greetButtons, ["立即沟通", "沟通", "打招呼"], {
     root: detailRoot,
@@ -968,6 +1274,7 @@ async function tryPrimaryAction(job) {
   if (greetButton) {
     const buttonLabel = normalizeText(greetButton.textContent) || "立即沟通";
     const clicked = triggerSafeClick(greetButton);
+    let choseStayOnPage = false;
     if (!clicked) {
       return {
         status: ACTION_RESULT.failed,
@@ -976,6 +1283,9 @@ async function tryPrimaryAction(job) {
     }
 
     await wait(1200);
+    if (!state.running || pauseForCommunicationLimit("点击沟通后")) {
+      return buildPausedActionResult();
+    }
 
     const stayButton = findClickable(SELECTORS.stayButtons, ["留在此页"], {
       root: findVisibleDialogRoot() || document,
@@ -983,10 +1293,7 @@ async function tryPrimaryAction(job) {
     });
     if (stayButton && triggerSafeClick(stayButton)) {
       await wait(400);
-      return {
-        status: ACTION_RESULT.greeted,
-        message: `已点击 ${buttonLabel}，并选择留在此页：${job.title || "当前职位"}`
-      };
+      choseStayOnPage = true;
     }
 
     const continueButton = findClickable(SELECTORS.stayButtons, ["继续沟通", "继续聊天", "已沟通"], {
@@ -995,7 +1302,9 @@ async function tryPrimaryAction(job) {
     if (continueButton) {
       return {
         status: ACTION_RESULT.greeted,
-        message: `已触发 ${buttonLabel}，页面已切换到继续沟通状态：${job.title || "当前职位"}`
+        message: choseStayOnPage
+          ? `已点击 ${buttonLabel}，留在当前页并进入继续沟通状态：${job.title || "当前职位"}`
+          : `已触发 ${buttonLabel}，页面已切换到继续沟通状态：${job.title || "当前职位"}`
       };
     }
 
@@ -1003,13 +1312,19 @@ async function tryPrimaryAction(job) {
     if (greetResult.sent) {
       return {
         status: ACTION_RESULT.greeted,
-        message: greetResult.message
+        message: choseStayOnPage ? `已留在当前页；${greetResult.message}` : greetResult.message
       };
     }
 
+    if (!state.running || pauseForCommunicationLimit("沟通反馈检测")) {
+      return buildPausedActionResult();
+    }
+
     return {
-      status: ACTION_RESULT.failed,
-      message: `已尝试点击 ${buttonLabel}，但页面没有出现沟通反馈：${job.title || "当前职位"}`
+      status: choseStayOnPage ? ACTION_RESULT.greeted : ACTION_RESULT.failed,
+      message: choseStayOnPage
+        ? `已点击 ${buttonLabel}，并选择留在此页：${job.title || "当前职位"}`
+        : `已尝试点击 ${buttonLabel}，但页面没有出现沟通反馈：${job.title || "当前职位"}`
     };
   }
 
@@ -1086,24 +1401,162 @@ function clickChatSend() {
 }
 
 async function trySendGreeting(job) {
+  const imageResumeResult = await tryUploadImageResumeIfNeeded();
   const message = buildGreetingMessage(job);
   const fillResult = fillChatInput(message);
   if (!fillResult.filled) {
-    return { sent: false };
+    return {
+      sent: false,
+      imageUploaded: imageResumeResult.uploaded
+    };
   }
 
   await wait(250);
   if (clickChatSend()) {
+    const parts = [];
+    if (imageResumeResult.uploaded) {
+      parts.push("已发送图片简历");
+    } else if (imageResumeResult.attempted && imageResumeResult.message) {
+      parts.push(imageResumeResult.message);
+    }
+    parts.push(`已发送招呼语：${truncateText(message, 26)}`);
     return {
       sent: true,
-      message: `已发送招呼语：${truncateText(message, 26)}`
+      message: parts.join("；")
     };
   }
 
   return {
     sent: false,
-    message: "已打开聊天输入框，但未找到发送按钮。"
+    message: imageResumeResult.uploaded
+      ? "已发送图片简历，但未找到发送按钮。"
+      : "已打开聊天输入框，但未找到发送按钮。"
   };
+}
+
+async function tryUploadImageResumeIfNeeded() {
+  if (!state.settings.sendImageResume || !state.settings.imageResumeDataUrl) {
+    return { uploaded: false, attempted: false };
+  }
+
+  let input = findImageResumeInput();
+  if (!input) {
+    const trigger = findClickable(SELECTORS.imageResumeTriggers, ["图片简历", "发送图片", "上传图片", "图片"], {
+      root: document
+    });
+    if (trigger) {
+      triggerSafeClick(trigger);
+      await wait(250);
+      input = findImageResumeInput();
+    }
+  }
+
+  if (!input) {
+    return {
+      uploaded: false,
+      attempted: true,
+      message: "未找到图片上传入口"
+    };
+  }
+
+  try {
+    const file = dataUrlToFile(
+      state.settings.imageResumeDataUrl,
+      state.settings.imageResumeFileName || "resume.jpg",
+      state.settings.imageResumeMimeType || "image/jpeg"
+    );
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await wait(500);
+    return {
+      uploaded: true,
+      attempted: true
+    };
+  } catch (_error) {
+    return {
+      uploaded: false,
+      attempted: true,
+      message: "图片简历上传失败"
+    };
+  }
+}
+
+function buildPausedActionResult() {
+  return {
+    status: ACTION_RESULT.paused,
+    message: ""
+  };
+}
+
+function pauseForCommunicationLimit(source = "") {
+  const modal = detectCommunicationLimitModal();
+  if (!modal) {
+    return false;
+  }
+
+  const paused = stopAutomation({
+    runtimeStatus: "communication_limit",
+    logType: "触发上限",
+    logMessage: "检测到“无法进行沟通”提示，已自动暂停海投。",
+    refreshReason: "检测到沟通上限"
+  });
+
+  if (!paused) {
+    return false;
+  }
+
+  if (modal.confirmButton && triggerSafeClick(modal.confirmButton)) {
+    logEvent("弹窗处理", `已自动点击“确定”关闭提示${source ? `：${source}` : ""}。`);
+  }
+
+  return true;
+}
+
+function detectCommunicationLimitModal() {
+  const roots = queryAllExisting(SELECTORS.dialogContainers)
+    .filter((element) => element instanceof HTMLElement && isElementVisible(element));
+
+  for (const root of roots) {
+    const compareText = normalizeCompareText(root.textContent);
+    const looksLikeLimitModal = compareText.includes(normalizeCompareText("无法进行沟通"))
+      && (
+        compareText.includes(normalizeCompareText("150位boss沟通"))
+        || compareText.includes(normalizeCompareText("休息一下"))
+        || compareText.includes(normalizeCompareText("明天再来"))
+      );
+
+    if (!looksLikeLimitModal) {
+      continue;
+    }
+
+    return {
+      root,
+      confirmButton: findClickable(SELECTORS.stayButtons, ["确定", "知道了"], {
+        root,
+        preferExact: true
+      })
+    };
+  }
+
+  const pageText = normalizeCompareText(document.body?.textContent);
+  const hasTitleHint = pageText.includes(normalizeCompareText(COMMUNICATION_LIMIT_HINTS[0]));
+  const hasQuotaHint = pageText.includes(normalizeCompareText(COMMUNICATION_LIMIT_HINTS[1]))
+    || pageText.includes(normalizeCompareText(COMMUNICATION_LIMIT_HINTS[2]));
+  const hasRestHint = pageText.includes(normalizeCompareText(COMMUNICATION_LIMIT_HINTS[3]))
+    || pageText.includes(normalizeCompareText(COMMUNICATION_LIMIT_HINTS[4]));
+  if (hasTitleHint && (hasQuotaHint || hasRestHint)) {
+    return {
+      root: null,
+      confirmButton: findClickable(["button", "a"], ["确定", "知道了"], {
+        preferExact: true
+      })
+    };
+  }
+
+  return null;
 }
 
 async function tryLoadMoreJobs(job) {
@@ -1138,6 +1591,7 @@ async function tryLoadMoreJobsFromList() {
 
 async function preloadFullJobList() {
   state.preloading = true;
+  state.fullListReadComplete = false;
   syncButtonState();
   logEvent("预加载", "正在滑动到列表底部，加载完整职位信息。");
 
@@ -1176,6 +1630,7 @@ async function preloadFullJobList() {
       }
     }
 
+    state.fullListReadComplete = true;
     refreshPageSnapshot("职位列表预加载完成");
     logEvent("预加载", `职位列表加载完成，当前识别 ${collectJobList().length} 个职位。`);
   } finally {
@@ -1229,7 +1684,6 @@ function toggleMinimize() {
 function cleanup() {
   clearTimeout(refreshTimer);
   clearTimeout(state.loopTimer);
-  clearInterval(state.autoReplyTimer);
   state.observer?.disconnect();
   window.removeEventListener("popstate", handleUrlMaybeChanged);
   window.removeEventListener("hashchange", handleUrlMaybeChanged);
@@ -1241,182 +1695,6 @@ function cleanup() {
     });
   }
   state.host?.remove();
-}
-
-async function tryAutoReply() {
-  if (!state.settings.autoReplyEnabled) {
-    return;
-  }
-  if (state.autoReplyInFlight) {
-    return;
-  }
-
-  const now = Date.now();
-  if (now - state.lastAutoReplyAt < AUTO_REPLY_MIN_INTERVAL) {
-    return;
-  }
-
-  if (!findVisibleChatInput()) {
-    return;
-  }
-
-  const chatMessages = collectChatMessages();
-  if (!chatMessages.length) {
-    return;
-  }
-
-  const lastMessage = chatMessages[chatMessages.length - 1];
-  if (lastMessage.role !== "user") {
-    return;
-  }
-
-  const signature = normalizeCompareText(lastMessage.content).slice(0, 180);
-  if (!signature || signature === state.lastAutoReplySignature) {
-    return;
-  }
-
-  const provider = getProviderSettings();
-  if (!provider.apiKey || !provider.endpoint) {
-    logEvent("自动回复", "未配置 API Key 或 Endpoint，已跳过自动回复。请在高级设置中填写。");
-    state.lastAutoReplySignature = signature;
-    return;
-  }
-
-  state.autoReplyInFlight = true;
-  try {
-    const payload = buildChatPayload(chatMessages, provider);
-    const response = await chrome.runtime.sendMessage({
-      type: "boss-helper:call-chat-api",
-      payload
-    });
-
-    if (!response?.ok) {
-      throw new Error(response?.error || "API 请求失败");
-    }
-
-    const reply = normalizeText(response?.result?.content);
-    if (!reply) {
-      throw new Error("API 返回为空");
-    }
-
-    const sent = await sendAutoReply(reply);
-    if (sent) {
-      state.lastAutoReplySignature = signature;
-      state.lastAutoReplyAt = Date.now();
-      logEvent("自动回复", `已发送：${truncateText(reply, 24)}`);
-    } else {
-      logEvent("自动回复", "已生成回复，但未找到发送入口。");
-    }
-  } catch (error) {
-    logEvent("自动回复失败", asMessage(error));
-  } finally {
-    state.autoReplyInFlight = false;
-  }
-}
-
-function getProviderSettings() {
-  const provider = state.settings.autoReplyProvider;
-  if (provider === "doubao") {
-    return {
-      provider,
-      apiKey: state.settings.doubaoApiKey,
-      endpoint: state.settings.doubaoEndpoint,
-      model: state.settings.doubaoModel
-    };
-  }
-  if (provider === "yuanbao") {
-    return {
-      provider,
-      apiKey: state.settings.yuanbaoApiKey,
-      endpoint: state.settings.yuanbaoEndpoint,
-      model: state.settings.yuanbaoModel
-    };
-  }
-  return {
-    provider: "deepseek",
-    apiKey: state.settings.deepseekApiKey,
-    endpoint: state.settings.deepseekEndpoint,
-    model: state.settings.deepseekModel
-  };
-}
-
-function buildChatPayload(chatMessages, provider) {
-  const systemPrompt = state.settings.autoReplySystemPrompt || DEFAULT_SETTINGS.autoReplySystemPrompt;
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...chatMessages.slice(-6)
-  ];
-
-  return {
-    provider: provider.provider,
-    apiKey: provider.apiKey,
-    endpoint: provider.endpoint,
-    model: provider.model,
-    temperature: state.settings.autoReplyTemperature,
-    maxTokens: state.settings.autoReplyMaxTokens,
-    messages
-  };
-}
-
-function collectChatMessages() {
-  const elements = findChatMessageElements();
-  if (!elements.length) {
-    return [];
-  }
-
-  const messages = [];
-  for (const element of elements) {
-    const content = normalizeText(element.textContent);
-    if (!content) {
-      continue;
-    }
-    messages.push({
-      role: getChatMessageRole(element),
-      content
-    });
-  }
-
-  return messages.filter((item) => item.content.length <= 600);
-}
-
-function findChatMessageElements() {
-  return queryAllExisting(SELECTORS.chatMessages)
-    .filter((element) => element instanceof HTMLElement && isElementVisible(element));
-}
-
-function getChatMessageRole(element) {
-  const classText = String(element.className || "").toLowerCase();
-  const selfContainer = element.closest("[class*='self'], [class*='right'], [class*='me'], [class*='mine']");
-  if (selfContainer || /self|right|mine|me/.test(classText)) {
-    return "assistant";
-  }
-
-  const otherContainer = element.closest("[class*='other'], [class*='left']");
-  if (otherContainer || /other|left/.test(classText)) {
-    return "user";
-  }
-
-  return "user";
-}
-
-function findVisibleChatInput() {
-  for (const selector of SELECTORS.chatInput) {
-    const element = document.querySelector(selector);
-    if (element && isElementVisible(element)) {
-      return element;
-    }
-  }
-  return null;
-}
-
-async function sendAutoReply(message) {
-  const fillResult = fillChatInput(message);
-  if (!fillResult.filled) {
-    return false;
-  }
-
-  await wait(200);
-  return clickChatSend();
 }
 
 function isBossJobPage() {
@@ -1673,13 +1951,17 @@ function getJobMatchDetails(job) {
   const titleOk = matchesLooseTokens(job.title, state.settings.jobKeywords);
   const locationOk = matchesLocation(job.location, state.settings.locationKeywords);
   const companyOk = matchesLooseTokens(job.company, state.settings.companyKeywords);
+  const excludeCompanyOk = !matchesExcludedCompany(job.company, state.settings.excludeCompanyKeywords);
   const salaryOk = matchesSalary(job.salary, state.settings.salaryKeywords);
+  const recruiterStatusOk = matchesRecruiterActivity(job.recruiterStatus, state.settings.recruiterActiveStatuses);
   return {
-    matches: titleOk && locationOk && companyOk && salaryOk,
+    matches: titleOk && locationOk && companyOk && excludeCompanyOk && salaryOk && recruiterStatusOk,
     titleOk,
     locationOk,
     companyOk,
-    salaryOk
+    excludeCompanyOk,
+    salaryOk,
+    recruiterStatusOk
   };
 }
 
@@ -1687,6 +1969,15 @@ function matchesLooseTokens(text, keywordString) {
   const tokens = splitKeywords(keywordString);
   if (!tokens.length) {
     return true;
+  }
+  const haystack = normalizeCompareText(text);
+  return tokens.some((token) => haystack.includes(normalizeCompareText(token)));
+}
+
+function matchesExcludedCompany(text, keywordString) {
+  const tokens = splitKeywords(keywordString);
+  if (!tokens.length) {
+    return false;
   }
   const haystack = normalizeCompareText(text);
   return tokens.some((token) => haystack.includes(normalizeCompareText(token)));
@@ -1766,6 +2057,42 @@ function splitKeywords(input) {
   return String(input || "").split(/[,，、\n]+/).map((item) => item.trim()).filter(Boolean);
 }
 
+function matchesRecruiterActivity(text, selectedStatuses) {
+  const statuses = normalizeStringArray(selectedStatuses);
+  if (!statuses.length) {
+    return true;
+  }
+
+  const status = normalizeRecruiterActivity(text);
+  if (!status) {
+    return false;
+  }
+
+  return statuses.some((item) => normalizeRecruiterActivity(item) === status);
+}
+
+function normalizeRecruiterActivity(text) {
+  const value = normalizeCompareText(text);
+  if (!value) {
+    return "";
+  }
+
+  return RECRUITER_ACTIVITY_OPTIONS.find((option) => {
+    return value.includes(normalizeCompareText(option));
+  }) || "";
+}
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index);
+}
+
 function buildMismatchSummary(jobs) {
   if (!jobs.length) {
     return "";
@@ -1787,8 +2114,14 @@ function buildMismatchSummary(jobs) {
     if (!job.matchDetails?.companyOk) {
       reasons.push(`公司不符(${job.company || "-"})`);
     }
+    if (!job.matchDetails?.excludeCompanyOk) {
+      reasons.push(`公司已排除(${job.company || "-"})`);
+    }
     if (!job.matchDetails?.salaryOk) {
       reasons.push(`薪资不符(${job.salary || "-"})`);
+    }
+    if (!job.matchDetails?.recruiterStatusOk) {
+      reasons.push(`状态不符(${job.recruiterStatus || "-"})`);
     }
     return `${index + 1}. ${job.title || "未识别职位"}：${reasons.join("，")}`;
   });
@@ -1851,6 +2184,21 @@ function findLocationLikeText(root) {
   return findTextCandidates(root).map(cleanLocationText).filter(Boolean).find(looksLikeLocation) || "";
 }
 
+function findRecruiterActivityLikeText(root) {
+  return findTextCandidates(root).map(extractRecruiterActivityFromText).find(Boolean) || "";
+}
+
+function extractRecruiterActivityFromText(text) {
+  const value = normalizeText(text);
+  if (!value) {
+    return "";
+  }
+
+  return RECRUITER_ACTIVITY_OPTIONS.find((item) => {
+    return normalizeCompareText(value).includes(normalizeCompareText(item));
+  }) || "";
+}
+
 function findTextCandidates(root) {
   const texts = new Set();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -1861,6 +2209,38 @@ function findTextCandidates(root) {
     }
   }
   return Array.from(texts);
+}
+
+function findImageResumeInput() {
+  for (const selector of SELECTORS.imageResumeInput) {
+    const candidates = Array.from(document.querySelectorAll(selector));
+    const match = candidates.find((element) => {
+      return element instanceof HTMLInputElement
+        && element.type === "file"
+        && /image/i.test(element.accept || "image/*");
+    }) || candidates.find((element) => element instanceof HTMLInputElement && element.type === "file");
+
+    if (match instanceof HTMLInputElement) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+function dataUrlToFile(dataUrl, fileName, mimeType) {
+  const [header, body] = String(dataUrl || "").split(",");
+  if (!header || !body) {
+    throw new Error("invalid data url");
+  }
+
+  const inferredMimeType = header.match(/data:(.*?);base64/i)?.[1] || mimeType || "image/jpeg";
+  const bytes = atob(body);
+  const array = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) {
+    array[index] = bytes.charCodeAt(index);
+  }
+  return new File([array], fileName || "resume.jpg", { type: inferredMimeType });
 }
 
 function looksLikeCompany(text) {
@@ -1905,23 +2285,32 @@ function asMessage(error) {
 }
 
 function setValue(id, value) {
-  state.shadowRoot.getElementById(id).value = value;
+  const element = state.shadowRoot?.getElementById(id);
+  if (element) {
+    element.value = value;
+  }
 }
 
 function getValue(id) {
-  return state.shadowRoot.getElementById(id).value.trim();
+  return state.shadowRoot?.getElementById(id)?.value?.trim() || "";
 }
 
 function setChecked(id, checked) {
-  state.shadowRoot.getElementById(id).checked = Boolean(checked);
+  const element = state.shadowRoot?.getElementById(id);
+  if (element) {
+    element.checked = Boolean(checked);
+  }
 }
 
 function getChecked(id) {
-  return state.shadowRoot.getElementById(id).checked;
+  return Boolean(state.shadowRoot?.getElementById(id)?.checked);
 }
 
 function setText(id, value) {
-  state.shadowRoot.getElementById(id).textContent = value;
+  const element = state.shadowRoot?.getElementById(id);
+  if (element) {
+    element.textContent = value;
+  }
 }
 
 function savePanelPosition() {
