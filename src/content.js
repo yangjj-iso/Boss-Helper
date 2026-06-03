@@ -2,6 +2,8 @@ const HOST_ID = "boss-helper-root";
 const PANEL_POSITION_KEY = "boss-helper:panel-position";
 const MAX_LOGS = 200;
 const MAX_JOB_RETRIES = 2;
+const AUTO_REPLY_POLL_MS = 1400;
+const AUTO_REPLY_MIN_INTERVAL = 6000;
 const COMMUNICATION_LIMIT_HINTS = [
   "无法进行沟通",
   "150位boss沟通",
@@ -33,7 +35,24 @@ const DEFAULT_SETTINGS = {
   autoGreet: true,
   autoNext: true,
   enabled: true,
-  pollIntervalMs: 1800
+  pollIntervalMs: 1800,
+  autoReplyEnabled: false,
+  autoReplyProvider: "deepseek",
+  autoReplySystemPrompt: "你是求职者，正在和BOSS直聘上的招聘负责人沟通。请用简洁礼貌的中文回复，并在必要时追问关键信息。",
+  autoReplyTemperature: 0.6,
+  autoReplyMaxTokens: 512,
+  doubaoApiKey: "",
+  deepseekApiKey: "",
+  yuanbaoApiKey: "",
+  doubaoEndpoint: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  deepseekEndpoint: "https://api.deepseek.com/chat/completions",
+  yuanbaoEndpoint: "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
+  doubaoModel: "",
+  deepseekModel: "deepseek-chat",
+  yuanbaoModel: "hunyuan-lite",
+  otherApiKey: "",
+  otherEndpoint: "https://api.openai.com/v1/chat/completions",
+  otherModel: "gpt-4o"
 };
 
 const SELECTORS = {
@@ -163,6 +182,13 @@ const SELECTORS = {
     "label",
     "span",
     "a"
+  ],
+  chatMessages: [
+    ".chat-message",
+    ".msg-item",
+    ".message-item",
+    "[class*='chat-msg']",
+    "[class*='msg-item']"
   ]
 };
 
@@ -185,7 +211,12 @@ const state = {
   panelMinimized: false,
   logs: [],
   startButtonLocked: false,
-  fullListReadComplete: false
+  fullListReadComplete: false,
+  autoReplyTimer: null,
+  lastAutoReplySignature: "",
+  lastAutoReplyAt: 0,
+  autoReplyInFlight: false,
+  autoReplyDebug: ""
 };
 
 const ACTION_RESULT = {
@@ -218,6 +249,7 @@ async function bootstrap() {
     logEvent("初始化", "扩展已注入页面。");
     refreshPageSnapshot("初始化完成");
     installObservers();
+    startAutoReplyLoop();
     syncButtonState();
   } catch (error) {
     console.error("[boss-helper] bootstrap failed", error);
@@ -784,6 +816,18 @@ function installObservers() {
   state.observer = observer;
   window.addEventListener("popstate", handleUrlMaybeChanged);
   window.addEventListener("hashchange", handleUrlMaybeChanged);
+}
+
+function startAutoReplyLoop() {
+  clearInterval(state.autoReplyTimer);
+  state.lastAutoReplySignature = "";
+  state.autoReplyDebug = "";
+  if (state.settings.autoReplyEnabled) {
+    logEvent("自动回复", "聊天监控已启动，等待聊天窗口出现。");
+  }
+  state.autoReplyTimer = setInterval(() => {
+    void tryAutoReply();
+  }, AUTO_REPLY_POLL_MS);
 }
 
 function handleUrlMaybeChanged() {
@@ -1684,6 +1728,7 @@ function toggleMinimize() {
 function cleanup() {
   clearTimeout(refreshTimer);
   clearTimeout(state.loopTimer);
+  clearInterval(state.autoReplyTimer);
   state.observer?.disconnect();
   window.removeEventListener("popstate", handleUrlMaybeChanged);
   window.removeEventListener("hashchange", handleUrlMaybeChanged);
@@ -1695,6 +1740,194 @@ function cleanup() {
     });
   }
   state.host?.remove();
+}
+
+async function tryAutoReply() {
+  if (!state.settings.autoReplyEnabled) {
+    return;
+  }
+  if (state.autoReplyInFlight) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - state.lastAutoReplyAt < AUTO_REPLY_MIN_INTERVAL) {
+    return;
+  }
+
+  const hasChatInput = Boolean(findVisibleChatInput());
+  const chatMessages = hasChatInput ? collectChatMessages() : [];
+  const lastIsUser = chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === "user";
+
+  const status = [
+    hasChatInput ? "有输入框" : "无输入框",
+    chatMessages.length ? `消息${chatMessages.length}条` : "无消息",
+    lastIsUser ? "对方最后发言" : (chatMessages.length ? "自己最后发言" : "-")
+  ].join(" | ");
+
+  if (status !== state.autoReplyDebug) {
+    state.autoReplyDebug = status;
+    logEvent("自动回复检测", status);
+  }
+
+  if (!hasChatInput || !chatMessages.length || !lastIsUser) {
+    return;
+  }
+
+  const lastMessage = chatMessages[chatMessages.length - 1];
+  const signature = normalizeCompareText(lastMessage.content).slice(0, 180);
+  if (!signature || signature === state.lastAutoReplySignature) {
+    return;
+  }
+
+  const provider = getProviderSettings();
+  if (!provider.apiKey || !provider.endpoint) {
+    logEvent("自动回复", "未配置 API Key 或 Endpoint，已跳过自动回复。请在高级设置中填写。");
+    state.lastAutoReplySignature = signature;
+    return;
+  }
+
+  state.autoReplyInFlight = true;
+  try {
+    const payload = buildChatPayload(chatMessages, provider);
+    const response = await chrome.runtime.sendMessage({
+      type: "boss-helper:call-chat-api",
+      payload
+    });
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "API 请求失败");
+    }
+
+    const reply = normalizeText(response?.result?.content);
+    if (!reply) {
+      throw new Error("API 返回为空");
+    }
+
+    const sent = await sendAutoReply(reply);
+    if (sent) {
+      state.lastAutoReplySignature = signature;
+      state.lastAutoReplyAt = Date.now();
+      logEvent("自动回复", `已发送：${truncateText(reply, 24)}`);
+    } else {
+      logEvent("自动回复", "已生成回复，但未找到发送入口。");
+    }
+  } catch (error) {
+    logEvent("自动回复失败", asMessage(error));
+  } finally {
+    state.autoReplyInFlight = false;
+  }
+}
+
+function getProviderSettings() {
+  const provider = state.settings.autoReplyProvider;
+  if (provider === "doubao") {
+    return {
+      provider,
+      apiKey: state.settings.doubaoApiKey,
+      endpoint: state.settings.doubaoEndpoint,
+      model: state.settings.doubaoModel
+    };
+  }
+  if (provider === "yuanbao") {
+    return {
+      provider,
+      apiKey: state.settings.yuanbaoApiKey,
+      endpoint: state.settings.yuanbaoEndpoint,
+      model: state.settings.yuanbaoModel
+    };
+  }
+  if (provider === "other") {
+    return {
+      provider,
+      apiKey: state.settings.otherApiKey,
+      endpoint: state.settings.otherEndpoint,
+      model: state.settings.otherModel
+    };
+  }
+  return {
+    provider: "deepseek",
+    apiKey: state.settings.deepseekApiKey,
+    endpoint: state.settings.deepseekEndpoint,
+    model: state.settings.deepseekModel
+  };
+}
+
+function buildChatPayload(chatMessages, provider) {
+  const systemPrompt = state.settings.autoReplySystemPrompt || DEFAULT_SETTINGS.autoReplySystemPrompt;
+  return {
+    provider: provider.provider,
+    apiKey: provider.apiKey,
+    endpoint: provider.endpoint,
+    model: provider.model,
+    temperature: state.settings.autoReplyTemperature,
+    maxTokens: state.settings.autoReplyMaxTokens,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...chatMessages.slice(-6)
+    ]
+  };
+}
+
+function collectChatMessages() {
+  const elements = findChatMessageElements();
+  if (!elements.length) {
+    return [];
+  }
+
+  const messages = [];
+  for (const element of elements) {
+    const content = normalizeText(element.textContent);
+    if (!content) {
+      continue;
+    }
+    messages.push({
+      role: getChatMessageRole(element),
+      content
+    });
+  }
+
+  return messages.filter((item) => item.content.length <= 600);
+}
+
+function findChatMessageElements() {
+  return queryAllExisting(SELECTORS.chatMessages)
+    .filter((element) => element instanceof HTMLElement && isElementVisible(element));
+}
+
+function getChatMessageRole(element) {
+  const classText = String(element.className || "").toLowerCase();
+  const selfContainer = element.closest("[class*='self'], [class*='right'], [class*='me'], [class*='mine']");
+  if (selfContainer || /self|right|mine|me/.test(classText)) {
+    return "assistant";
+  }
+
+  const otherContainer = element.closest("[class*='other'], [class*='left']");
+  if (otherContainer || /other|left/.test(classText)) {
+    return "user";
+  }
+
+  return "user";
+}
+
+function findVisibleChatInput() {
+  for (const selector of SELECTORS.chatInput) {
+    const element = document.querySelector(selector);
+    if (element && isElementVisible(element)) {
+      return element;
+    }
+  }
+  return null;
+}
+
+async function sendAutoReply(message) {
+  const fillResult = fillChatInput(message);
+  if (!fillResult.filled) {
+    return false;
+  }
+
+  await wait(200);
+  return clickChatSend();
 }
 
 function isBossJobPage() {

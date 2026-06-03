@@ -10,7 +10,24 @@ const DEFAULT_SETTINGS = {
   imageResumeMimeType: "",
   autoGreet: true,
   autoNext: true,
-  pollIntervalMs: 1800
+  pollIntervalMs: 1800,
+  autoReplyEnabled: false,
+  autoReplyProvider: "deepseek",
+  autoReplySystemPrompt: "你是求职者，正在和BOSS直聘上的招聘负责人沟通。请用简洁礼貌的中文回复，并在必要时追问关键信息。",
+  autoReplyTemperature: 0.6,
+  autoReplyMaxTokens: 512,
+  doubaoApiKey: "",
+  deepseekApiKey: "",
+  yuanbaoApiKey: "",
+  doubaoEndpoint: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  deepseekEndpoint: "https://api.deepseek.com/chat/completions",
+  yuanbaoEndpoint: "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
+  doubaoModel: "",
+  deepseekModel: "deepseek-chat",
+  yuanbaoModel: "hunyuan-lite",
+  otherApiKey: "",
+  otherEndpoint: "https://api.openai.com/v1/chat/completions",
+  otherModel: "gpt-4o"
 };
 
 const RECRUITER_ACTIVITY_OPTIONS = [
@@ -34,6 +51,26 @@ const elements = {
   pollIntervalMs: document.getElementById("pollIntervalMs"),
   autoGreet: document.getElementById("autoGreet"),
   autoNext: document.getElementById("autoNext"),
+  autoReplyEnabled: document.getElementById("autoReplyEnabled"),
+  autoReplyProvider: document.getElementById("autoReplyProvider"),
+  autoReplySystemPrompt: document.getElementById("autoReplySystemPrompt"),
+  autoReplyTemperature: document.getElementById("autoReplyTemperature"),
+  autoReplyMaxTokens: document.getElementById("autoReplyMaxTokens"),
+  doubaoApiKey: document.getElementById("doubaoApiKey"),
+  doubaoEndpoint: document.getElementById("doubaoEndpoint"),
+  doubaoModel: document.getElementById("doubaoModel"),
+  deepseekApiKey: document.getElementById("deepseekApiKey"),
+  deepseekEndpoint: document.getElementById("deepseekEndpoint"),
+  deepseekModel: document.getElementById("deepseekModel"),
+  yuanbaoApiKey: document.getElementById("yuanbaoApiKey"),
+  yuanbaoEndpoint: document.getElementById("yuanbaoEndpoint"),
+  yuanbaoModel: document.getElementById("yuanbaoModel"),
+  otherApiKey: document.getElementById("otherApiKey"),
+  otherEndpoint: document.getElementById("otherEndpoint"),
+  otherModel: document.getElementById("otherModel"),
+  autoReplyTestInput: document.getElementById("autoReplyTestInput"),
+  autoReplyTestButton: document.getElementById("autoReplyTestButton"),
+  autoReplyTestResult: document.getElementById("autoReplyTestResult"),
   saveStatus: document.getElementById("saveStatus"),
   closeButton: document.getElementById("closeButton")
 };
@@ -67,6 +104,24 @@ function hydrate(settings) {
   setCheckedValue(elements.autoGreet, Boolean(settings.autoGreet));
   setCheckedValue(elements.autoNext, Boolean(settings.autoNext));
   hydrateRecruiterActivityOptions(settings.recruiterActiveStatuses || []);
+  setCheckedValue(elements.autoReplyEnabled, Boolean(settings.autoReplyEnabled));
+  setInputValue(elements.autoReplyProvider, settings.autoReplyProvider || DEFAULT_SETTINGS.autoReplyProvider);
+  setInputValue(elements.autoReplySystemPrompt, settings.autoReplySystemPrompt || DEFAULT_SETTINGS.autoReplySystemPrompt);
+  setInputValue(elements.autoReplyTemperature, String(settings.autoReplyTemperature ?? DEFAULT_SETTINGS.autoReplyTemperature));
+  setInputValue(elements.autoReplyMaxTokens, String(settings.autoReplyMaxTokens ?? DEFAULT_SETTINGS.autoReplyMaxTokens));
+  setInputValue(elements.doubaoApiKey, settings.doubaoApiKey || "");
+  setInputValue(elements.doubaoEndpoint, settings.doubaoEndpoint || DEFAULT_SETTINGS.doubaoEndpoint);
+  setInputValue(elements.doubaoModel, settings.doubaoModel || DEFAULT_SETTINGS.doubaoModel);
+  setInputValue(elements.deepseekApiKey, settings.deepseekApiKey || "");
+  setInputValue(elements.deepseekEndpoint, settings.deepseekEndpoint || DEFAULT_SETTINGS.deepseekEndpoint);
+  setInputValue(elements.deepseekModel, settings.deepseekModel || DEFAULT_SETTINGS.deepseekModel);
+  setInputValue(elements.yuanbaoApiKey, settings.yuanbaoApiKey || "");
+  setInputValue(elements.yuanbaoEndpoint, settings.yuanbaoEndpoint || DEFAULT_SETTINGS.yuanbaoEndpoint);
+  setInputValue(elements.yuanbaoModel, settings.yuanbaoModel || DEFAULT_SETTINGS.yuanbaoModel);
+  setInputValue(elements.otherApiKey, settings.otherApiKey || "");
+  setInputValue(elements.otherEndpoint, settings.otherEndpoint || DEFAULT_SETTINGS.otherEndpoint);
+  setInputValue(elements.otherModel, settings.otherModel || DEFAULT_SETTINGS.otherModel);
+  updateProviderVisibility();
 }
 
 function bindEvents() {
@@ -78,7 +133,24 @@ function bindEvents() {
     "sendImageResume",
     "pollIntervalMs",
     "autoGreet",
-    "autoNext"
+    "autoNext",
+    "autoReplyEnabled",
+    "autoReplyProvider",
+    "autoReplySystemPrompt",
+    "autoReplyTemperature",
+    "autoReplyMaxTokens",
+    "doubaoApiKey",
+    "doubaoEndpoint",
+    "doubaoModel",
+    "deepseekApiKey",
+    "deepseekEndpoint",
+    "deepseekModel",
+    "yuanbaoApiKey",
+    "yuanbaoEndpoint",
+    "yuanbaoModel",
+    "otherApiKey",
+    "otherEndpoint",
+    "otherModel"
   ]) {
     const element = elements[key];
     if (!element) {
@@ -110,6 +182,10 @@ function bindEvents() {
     await saveSettings({ silent: true });
     window.close();
   });
+
+  elements.autoReplyTestButton?.addEventListener("click", () => {
+    void runAutoReplyTest();
+  });
 }
 
 async function saveSettings(options = {}) {
@@ -125,11 +201,29 @@ async function saveSettings(options = {}) {
     imageResumeMimeType: elements.imageResumeName?.dataset.mimeType || "",
     pollIntervalMs: clampNumber(Number(elements.pollIntervalMs?.value), 600, 15000, DEFAULT_SETTINGS.pollIntervalMs),
     autoGreet: Boolean(elements.autoGreet?.checked),
-    autoNext: Boolean(elements.autoNext?.checked)
+    autoNext: Boolean(elements.autoNext?.checked),
+    autoReplyEnabled: Boolean(elements.autoReplyEnabled?.checked),
+    autoReplyProvider: getInputValue(elements.autoReplyProvider),
+    autoReplySystemPrompt: getInputValue(elements.autoReplySystemPrompt) || DEFAULT_SETTINGS.autoReplySystemPrompt,
+    autoReplyTemperature: clampNumber(Number(elements.autoReplyTemperature?.value), 0, 1, DEFAULT_SETTINGS.autoReplyTemperature),
+    autoReplyMaxTokens: clampNumber(Number(elements.autoReplyMaxTokens?.value), 64, 4096, DEFAULT_SETTINGS.autoReplyMaxTokens),
+    doubaoApiKey: getInputValue(elements.doubaoApiKey),
+    doubaoEndpoint: getInputValue(elements.doubaoEndpoint) || DEFAULT_SETTINGS.doubaoEndpoint,
+    doubaoModel: getInputValue(elements.doubaoModel) || DEFAULT_SETTINGS.doubaoModel,
+    deepseekApiKey: getInputValue(elements.deepseekApiKey),
+    deepseekEndpoint: getInputValue(elements.deepseekEndpoint) || DEFAULT_SETTINGS.deepseekEndpoint,
+    deepseekModel: getInputValue(elements.deepseekModel) || DEFAULT_SETTINGS.deepseekModel,
+    yuanbaoApiKey: getInputValue(elements.yuanbaoApiKey),
+    yuanbaoEndpoint: getInputValue(elements.yuanbaoEndpoint) || DEFAULT_SETTINGS.yuanbaoEndpoint,
+    yuanbaoModel: getInputValue(elements.yuanbaoModel) || DEFAULT_SETTINGS.yuanbaoModel,
+    otherApiKey: getInputValue(elements.otherApiKey),
+    otherEndpoint: getInputValue(elements.otherEndpoint) || DEFAULT_SETTINGS.otherEndpoint,
+    otherModel: getInputValue(elements.otherModel) || DEFAULT_SETTINGS.otherModel
   });
 
   try {
     await chrome.storage.local.set(payload);
+    updateProviderVisibility();
     if (!options.silent) {
       setTextValue(elements.saveStatus, `已保存 ${new Date().toLocaleTimeString()}`);
     }
@@ -234,7 +328,24 @@ function normalizeSettings(payload = {}) {
     imageResumeMimeType: typeof payload.imageResumeMimeType === "string" ? payload.imageResumeMimeType : "",
     autoGreet: Boolean(payload.autoGreet),
     autoNext: Boolean(payload.autoNext),
-    pollIntervalMs: clampNumber(Number(payload.pollIntervalMs), 600, 15000, DEFAULT_SETTINGS.pollIntervalMs)
+    pollIntervalMs: clampNumber(Number(payload.pollIntervalMs), 600, 15000, DEFAULT_SETTINGS.pollIntervalMs),
+    autoReplyEnabled: Boolean(payload.autoReplyEnabled),
+    autoReplyProvider: String(payload.autoReplyProvider || DEFAULT_SETTINGS.autoReplyProvider),
+    autoReplySystemPrompt: String(payload.autoReplySystemPrompt || "").trim() || DEFAULT_SETTINGS.autoReplySystemPrompt,
+    autoReplyTemperature: clampNumber(Number(payload.autoReplyTemperature), 0, 1, DEFAULT_SETTINGS.autoReplyTemperature),
+    autoReplyMaxTokens: clampNumber(Number(payload.autoReplyMaxTokens), 64, 4096, DEFAULT_SETTINGS.autoReplyMaxTokens),
+    doubaoApiKey: String(payload.doubaoApiKey || ""),
+    deepseekApiKey: String(payload.deepseekApiKey || ""),
+    yuanbaoApiKey: String(payload.yuanbaoApiKey || ""),
+    doubaoEndpoint: String(payload.doubaoEndpoint || DEFAULT_SETTINGS.doubaoEndpoint),
+    deepseekEndpoint: String(payload.deepseekEndpoint || DEFAULT_SETTINGS.deepseekEndpoint),
+    yuanbaoEndpoint: String(payload.yuanbaoEndpoint || DEFAULT_SETTINGS.yuanbaoEndpoint),
+    doubaoModel: String(payload.doubaoModel || DEFAULT_SETTINGS.doubaoModel),
+    deepseekModel: String(payload.deepseekModel || DEFAULT_SETTINGS.deepseekModel),
+    yuanbaoModel: String(payload.yuanbaoModel || DEFAULT_SETTINGS.yuanbaoModel),
+    otherApiKey: String(payload.otherApiKey || ""),
+    otherEndpoint: String(payload.otherEndpoint || DEFAULT_SETTINGS.otherEndpoint),
+    otherModel: String(payload.otherModel || DEFAULT_SETTINGS.otherModel)
   };
 }
 
@@ -263,5 +374,97 @@ function setTextValue(element, value) {
 function setDatasetValue(element, key, value) {
   if (element?.dataset) {
     element.dataset[key] = value;
+  }
+}
+
+async function runAutoReplyTest() {
+  const provider = getProviderSettingsFromForm();
+  const userText = getInputValue(elements.autoReplyTestInput) || "你好方便发份简历过来吗";
+
+  setTextValue(elements.autoReplyTestResult, "测试中，请稍候...");
+  if (elements.autoReplyTestButton) {
+    elements.autoReplyTestButton.disabled = true;
+  }
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "boss-helper:call-chat-api",
+      payload: {
+        provider: provider.provider,
+        apiKey: provider.apiKey,
+        endpoint: provider.endpoint,
+        model: provider.model,
+        temperature: clampNumber(Number(getInputValue(elements.autoReplyTemperature)), 0, 1, DEFAULT_SETTINGS.autoReplyTemperature),
+        maxTokens: clampNumber(Number(getInputValue(elements.autoReplyMaxTokens)), 64, 4096, DEFAULT_SETTINGS.autoReplyMaxTokens),
+        messages: buildTestMessages(userText)
+      }
+    });
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "测试请求失败");
+    }
+
+    const reply = response?.result?.content || "";
+    setTextValue(elements.autoReplyTestResult, reply ? `回复：${reply}` : "未返回有效内容。");
+  } catch (error) {
+    setTextValue(elements.autoReplyTestResult, `测试失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    if (elements.autoReplyTestButton) {
+      elements.autoReplyTestButton.disabled = false;
+    }
+  }
+}
+
+function buildTestMessages(userText) {
+  const systemPrompt = getInputValue(elements.autoReplySystemPrompt) || DEFAULT_SETTINGS.autoReplySystemPrompt;
+  return [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userText }
+  ];
+}
+
+function getProviderSettingsFromForm() {
+  const provider = getInputValue(elements.autoReplyProvider);
+  if (provider === "doubao") {
+    return {
+      provider,
+      apiKey: getInputValue(elements.doubaoApiKey),
+      endpoint: getInputValue(elements.doubaoEndpoint) || DEFAULT_SETTINGS.doubaoEndpoint,
+      model: getInputValue(elements.doubaoModel) || DEFAULT_SETTINGS.doubaoModel
+    };
+  }
+
+  if (provider === "yuanbao") {
+    return {
+      provider,
+      apiKey: getInputValue(elements.yuanbaoApiKey),
+      endpoint: getInputValue(elements.yuanbaoEndpoint) || DEFAULT_SETTINGS.yuanbaoEndpoint,
+      model: getInputValue(elements.yuanbaoModel) || DEFAULT_SETTINGS.yuanbaoModel
+    };
+  }
+
+  if (provider === "other") {
+    return {
+      provider,
+      apiKey: getInputValue(elements.otherApiKey),
+      endpoint: getInputValue(elements.otherEndpoint) || DEFAULT_SETTINGS.otherEndpoint,
+      model: getInputValue(elements.otherModel) || DEFAULT_SETTINGS.otherModel
+    };
+  }
+
+  return {
+    provider: "deepseek",
+    apiKey: getInputValue(elements.deepseekApiKey),
+    endpoint: getInputValue(elements.deepseekEndpoint) || DEFAULT_SETTINGS.deepseekEndpoint,
+    model: getInputValue(elements.deepseekModel) || DEFAULT_SETTINGS.deepseekModel
+  };
+}
+
+function updateProviderVisibility() {
+  const selected = getInputValue(elements.autoReplyProvider) || "deepseek";
+  const groups = document.querySelectorAll(".provider-group");
+  for (const group of groups) {
+    const provider = group.dataset.provider || "";
+    group.classList.toggle("active", provider === selected);
   }
 }
