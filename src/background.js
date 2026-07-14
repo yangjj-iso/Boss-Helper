@@ -1,11 +1,23 @@
 const DEFAULT_SETTINGS = {
   jobKeywords: "",
   locationKeywords: "",
+  jobMatchMode: "any",
+  excludeJobKeywords: "",
   salaryKeywords: "",
   companyKeywords: "",
   excludeCompanyKeywords: "",
   recruiterActiveStatuses: [],
   greetTemplate: "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+  greetTemplates: [
+    "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+    "您好，看到{companyName}的{jobTitle}很匹配我的方向，方便进一步了解吗？",
+    "您好，我有相关项目经验，对{jobTitle}（{location}/{salary}）很感兴趣，期待沟通。"
+  ],
+  greetRotate: true,
+  dailyLimit: 50,
+  dailyCount: 0,
+  dailyCountDate: "",
+  historyRecords: [],
   sendImageResume: false,
   imageResumeFileName: "",
   imageResumeDataUrl: "",
@@ -40,25 +52,49 @@ const DEFAULT_RUNTIME = {
 
 let advancedWindowId = null;
 
-chrome.runtime.onInstalled.addListener(async () => {
-  const settings = await chrome.storage.local.get(DEFAULT_SETTINGS);
-  const runtime = await chrome.storage.local.get(DEFAULT_RUNTIME);
+chrome.runtime.onInstalled.addListener(() => {
+  void ensureDefaultsSeeded();
+});
 
-  await chrome.storage.local.set({
-    ...DEFAULT_SETTINGS,
-    ...settings,
-    ...DEFAULT_RUNTIME,
-    ...runtime
+chrome.runtime.onStartup?.addListener?.(() => {
+  void ensureDefaultsSeeded();
+});
+
+// 点击扩展图标时给出入口提示，并尽量打开高级设置
+chrome.action?.onClicked?.addListener(() => {
+  void openAdvancedWindow().catch((error) => {
+    console.warn("[boss-helper] open advanced from action failed", error);
   });
 });
 
+async function ensureDefaultsSeeded() {
+  try {
+    const settings = await chrome.storage.local.get(DEFAULT_SETTINGS);
+    const runtime = await chrome.storage.local.get(DEFAULT_RUNTIME);
+    const normalized = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      ...settings
+    });
+    await chrome.storage.local.set({
+      ...normalized,
+      ...DEFAULT_RUNTIME,
+      ...runtime
+    });
+  } catch (error) {
+    console.error("[boss-helper] seed defaults failed", error);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "boss-helper:get-settings") {
-    chrome.storage.local.get(DEFAULT_SETTINGS).then((settings) => {
-      sendResponse({ ok: true, settings });
-    }).catch((error) => {
-      sendResponse({ ok: false, error: error?.message || String(error) });
-    });
+    ensureDefaultsSeeded()
+      .then(() => chrome.storage.local.get(DEFAULT_SETTINGS))
+      .then((settings) => {
+        sendResponse({ ok: true, settings: normalizeSettings(settings) });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error?.message || String(error) });
+      });
     return true;
   }
 
@@ -134,7 +170,9 @@ chrome.windows?.onRemoved?.addListener((windowId) => {
 });
 
 async function openAdvancedWindow() {
-  if (advancedWindowId !== null) {
+  const pageUrl = chrome.runtime.getURL("advanced.html");
+
+  if (advancedWindowId !== null && chrome.windows?.update) {
     try {
       await chrome.windows.update(advancedWindowId, { focused: true });
       return advancedWindowId;
@@ -143,24 +181,47 @@ async function openAdvancedWindow() {
     }
   }
 
-  const created = await chrome.windows.create({
-    url: chrome.runtime.getURL("advanced.html"),
-    type: "popup",
-    focused: true,
-    width: 460,
-    height: 720
-  });
+  // 优先弹窗；无 windows 权限或失败时，退回新标签页，保证设置页可打开
+  if (chrome.windows?.create) {
+    try {
+      const created = await chrome.windows.create({
+        url: pageUrl,
+        type: "popup",
+        focused: true,
+        width: 460,
+        height: 720
+      });
+      advancedWindowId = created.id ?? null;
+      return advancedWindowId;
+    } catch (error) {
+      console.warn("[boss-helper] windows.create failed, fallback to tab", error);
+    }
+  }
 
-  advancedWindowId = created.id ?? null;
-  return advancedWindowId;
+  if (chrome.tabs?.create) {
+    const tab = await chrome.tabs.create({ url: pageUrl, active: true });
+    return tab?.id ?? null;
+  }
+
+  throw new Error("无法打开高级设置页，请检查扩展权限后重试。");
 }
 
 function normalizeSettings(payload = {}) {
+  const greetTemplates = normalizeGreetingTemplates(payload.greetTemplates, payload.greetTemplate);
   return {
     ...DEFAULT_SETTINGS,
     ...payload,
+    jobMatchMode: payload.jobMatchMode === "all" ? "all" : "any",
+    excludeJobKeywords: String(payload.excludeJobKeywords || "").trim(),
     excludeCompanyKeywords: String(payload.excludeCompanyKeywords || "").trim(),
     recruiterActiveStatuses: normalizeStringArray(payload.recruiterActiveStatuses),
+    greetTemplate: greetTemplates[0] || DEFAULT_SETTINGS.greetTemplate,
+    greetTemplates,
+    greetRotate: payload.greetRotate !== false,
+    dailyLimit: clampNumber(Number(payload.dailyLimit), 1, 150, DEFAULT_SETTINGS.dailyLimit),
+    dailyCount: clampNumber(Number(payload.dailyCount), 0, 9999, 0),
+    dailyCountDate: String(payload.dailyCountDate || ""),
+    historyRecords: normalizeHistoryRecords(payload.historyRecords),
     sendImageResume: Boolean(payload.sendImageResume),
     imageResumeFileName: String(payload.imageResumeFileName || "").trim(),
     imageResumeDataUrl: typeof payload.imageResumeDataUrl === "string" ? payload.imageResumeDataUrl : "",
@@ -173,6 +234,35 @@ function normalizeSettings(payload = {}) {
     autoReplyTemperature: clampNumber(Number(payload.autoReplyTemperature), 0, 1, DEFAULT_SETTINGS.autoReplyTemperature),
     autoReplyMaxTokens: clampNumber(Number(payload.autoReplyMaxTokens), 64, 4096, DEFAULT_SETTINGS.autoReplyMaxTokens)
   };
+}
+
+function normalizeGreetingTemplates(list, fallback) {
+  const fromList = Array.isArray(list)
+    ? list.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (fromList.length) {
+    return fromList.slice(0, 8);
+  }
+  const single = String(fallback || "").trim();
+  return single ? [single] : [...DEFAULT_SETTINGS.greetTemplates];
+}
+
+function normalizeHistoryRecords(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item) => item && typeof item === "object")
+    .slice(0, 300)
+    .map((item) => ({
+      id: String(item.id || ""),
+      at: String(item.at || ""),
+      title: String(item.title || ""),
+      company: String(item.company || ""),
+      salary: String(item.salary || ""),
+      location: String(item.location || ""),
+      status: String(item.status || "")
+    }));
 }
 
 function normalizeStringArray(value) {

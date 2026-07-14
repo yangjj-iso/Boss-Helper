@@ -4,6 +4,13 @@ const DEFAULT_SETTINGS = {
   excludeCompanyKeywords: "",
   recruiterActiveStatuses: [],
   greetTemplate: "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+  greetTemplates: [
+    "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+    "您好，看到{companyName}的{jobTitle}很匹配我的方向，方便进一步了解吗？",
+    "您好，我有相关项目经验，对{jobTitle}（{location}/{salary}）很感兴趣，期待沟通。"
+  ],
+  greetRotate: true,
+  dailyLimit: 50,
   sendImageResume: false,
   imageResumeFileName: "",
   imageResumeDataUrl: "",
@@ -44,6 +51,9 @@ const elements = {
   excludeCompanyKeywords: document.getElementById("excludeCompanyKeywords"),
   recruiterActivityOptions: Array.from(document.querySelectorAll("[data-activity-option]")),
   greetTemplate: document.getElementById("greetTemplate"),
+  greetTemplates: document.getElementById("greetTemplates"),
+  greetRotate: document.getElementById("greetRotate"),
+  dailyLimit: document.getElementById("dailyLimit"),
   sendImageResume: document.getElementById("sendImageResume"),
   imageResumeInput: document.getElementById("imageResumeInput"),
   imageResumeButton: document.getElementById("imageResumeButton"),
@@ -79,12 +89,17 @@ void bootstrap();
 
 async function bootstrap() {
   try {
-    const settings = normalizeSettings(await chrome.storage.local.get(DEFAULT_SETTINGS));
+    const raw = await chrome.storage.local.get(null);
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      ...raw
+    });
     hydrate(settings);
     bindEvents();
+    setTextValue(elements.saveStatus, "设置已加载，修改后会自动保存");
   } catch (error) {
     if (elements.saveStatus) {
-      elements.saveStatus.textContent = error instanceof Error ? error.message : String(error);
+      elements.saveStatus.textContent = `设置加载失败：${error instanceof Error ? error.message : String(error)}。请关闭后重新打开，或重新加载扩展。`;
     }
   }
 }
@@ -94,6 +109,12 @@ function hydrate(settings) {
   setInputValue(elements.companyKeywords, settings.companyKeywords || "");
   setInputValue(elements.excludeCompanyKeywords, settings.excludeCompanyKeywords || "");
   setInputValue(elements.greetTemplate, settings.greetTemplate || DEFAULT_SETTINGS.greetTemplate);
+  setInputValue(
+    elements.greetTemplates,
+    (Array.isArray(settings.greetTemplates) ? settings.greetTemplates : DEFAULT_SETTINGS.greetTemplates).join("\n")
+  );
+  setCheckedValue(elements.greetRotate, settings.greetRotate !== false);
+  setInputValue(elements.dailyLimit, String(settings.dailyLimit || DEFAULT_SETTINGS.dailyLimit));
   setCheckedValue(elements.sendImageResume, Boolean(settings.sendImageResume));
   setTextValue(elements.imageResumeName, settings.imageResumeFileName || "未选择");
   setDatasetValue(elements.imageResumeName, "fileName", settings.imageResumeFileName || "");
@@ -130,6 +151,9 @@ function bindEvents() {
     "companyKeywords",
     "excludeCompanyKeywords",
     "greetTemplate",
+    "greetTemplates",
+    "greetRotate",
+    "dailyLimit",
     "sendImageResume",
     "pollIntervalMs",
     "autoGreet",
@@ -195,6 +219,9 @@ async function saveSettings(options = {}) {
     excludeCompanyKeywords: getInputValue(elements.excludeCompanyKeywords),
     recruiterActiveStatuses: getSelectedRecruiterActivities(),
     greetTemplate: getInputValue(elements.greetTemplate) || DEFAULT_SETTINGS.greetTemplate,
+    greetTemplates: splitLines(getInputValue(elements.greetTemplates)),
+    greetRotate: Boolean(elements.greetRotate?.checked),
+    dailyLimit: clampNumber(Number(elements.dailyLimit?.value), 1, 150, DEFAULT_SETTINGS.dailyLimit),
     sendImageResume: Boolean(elements.sendImageResume?.checked),
     imageResumeFileName: elements.imageResumeName?.dataset.fileName || "",
     imageResumeDataUrl: elements.imageResumeName?.dataset.dataUrl || "",
@@ -222,13 +249,19 @@ async function saveSettings(options = {}) {
   });
 
   try {
-    await chrome.storage.local.set(payload);
+    // 只更新高级页字段，避免覆盖主面板职位关键词等
+    const current = await chrome.storage.local.get(null);
+    const next = {
+      ...current,
+      ...payload
+    };
+    await chrome.storage.local.set(next);
     updateProviderVisibility();
     if (!options.silent) {
-      setTextValue(elements.saveStatus, `已保存 ${new Date().toLocaleTimeString()}`);
+      setTextValue(elements.saveStatus, `已保存 ${new Date().toLocaleTimeString()}，返回职位页即可生效`);
     }
   } catch (error) {
-    setTextValue(elements.saveStatus, error instanceof Error ? error.message : String(error));
+    setTextValue(elements.saveStatus, `保存失败：${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -296,6 +329,25 @@ function normalizeStringArray(value) {
     .filter((item, index, list) => list.indexOf(item) === index);
 }
 
+function splitLines(text) {
+  return String(text || "")
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function normalizeGreetingTemplates(list, fallback) {
+  const fromList = Array.isArray(list)
+    ? list.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (fromList.length) {
+    return fromList.slice(0, 8);
+  }
+  const single = String(fallback || "").trim();
+  return single ? [single] : [...DEFAULT_SETTINGS.greetTemplates];
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -322,6 +374,9 @@ function normalizeSettings(payload = {}) {
     excludeCompanyKeywords: String(payload.excludeCompanyKeywords || "").trim(),
     recruiterActiveStatuses: normalizeStringArray(payload.recruiterActiveStatuses),
     greetTemplate: String(payload.greetTemplate || "").trim() || DEFAULT_SETTINGS.greetTemplate,
+    greetTemplates: normalizeGreetingTemplates(payload.greetTemplates, payload.greetTemplate),
+    greetRotate: payload.greetRotate !== false,
+    dailyLimit: clampNumber(Number(payload.dailyLimit), 1, 150, DEFAULT_SETTINGS.dailyLimit),
     sendImageResume: Boolean(payload.sendImageResume),
     imageResumeFileName: String(payload.imageResumeFileName || "").trim(),
     imageResumeDataUrl: typeof payload.imageResumeDataUrl === "string" ? payload.imageResumeDataUrl : "",

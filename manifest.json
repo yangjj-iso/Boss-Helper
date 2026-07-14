@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "BOSS海投助手",
-  "version": "0.1.1",
-  "description": "在 BOSS 直聘页面注入右上角悬浮助手小窗。",
+  "version": "0.2.2",
+  "description": "BOSS 职位智能筛选、匹配预览、每日上限、多招呼语与沟通记录导出。",
   "permissions": [
-    "storage"
+    "storage",
+    "windows"
   ],
   "host_permissions": [
     "https://www.zhipin.com/*",
     "https://zhipin.com/*",
+    "https://*.zhipin.com/*",
     "https://api.deepseek.com/*",
     "https://ark.cn-beijing.volces.com/*",
     "https://api.hunyuan.cloud.tencent.com/*",
@@ -21,12 +23,26 @@
     {
       "matches": [
         "https://www.zhipin.com/*",
-        "https://zhipin.com/*"
+        "https://zhipin.com/*",
+        "https://*.zhipin.com/*"
       ],
       "js": [
         "src/content.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "advanced.html",
+        "src/advanced.js"
+      ],
+      "matches": [
+        "https://www.zhipin.com/*",
+        "https://zhipin.com/*",
+        "https://*.zhipin.com/*"
+      ]
     }
   ],
   "action": {

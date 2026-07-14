@@ -1,9 +1,13 @@
 const HOST_ID = "boss-helper-root";
 const PANEL_POSITION_KEY = "boss-helper:panel-position";
 const MAX_LOGS = 200;
-const MAX_JOB_RETRIES = 2;
+const MAX_JOB_RETRIES = 3;
 const AUTO_REPLY_POLL_MS = 1400;
 const AUTO_REPLY_MIN_INTERVAL = 6000;
+const DETAIL_WAIT_ATTEMPTS = 16;
+const DETAIL_WAIT_STEP_MS = 280;
+const ACTION_WAIT_ATTEMPTS = 12;
+const ACTION_WAIT_STEP_MS = 320;
 const COMMUNICATION_LIMIT_HINTS = [
   "无法进行沟通",
   "150位boss沟通",
@@ -20,14 +24,119 @@ const RECRUITER_ACTIVITY_OPTIONS = [
   "本周活跃"
 ];
 
+// 地点别名：筛选项与列表文案对齐（比较前会再去市/区后缀）
+const LOCATION_ALIASES = {
+  北京: ["beijing", "bj", "帝都"],
+  上海: ["shanghai", "sh", "魔都"],
+  深圳: ["shenzhen", "sz"],
+  广州: ["guangzhou", "gz"],
+  杭州: ["hangzhou", "hz"],
+  成都: ["chengdu", "cd"],
+  重庆: ["chongqing", "cq"],
+  武汉: ["wuhan", "wh"],
+  西安: ["xian", "西安市"],
+  南京: ["nanjing", "nj"],
+  苏州: ["suzhou"],
+  天津: ["tianjin", "tj"],
+  长沙: ["changsha"],
+  郑州: ["zhengzhou"],
+  青岛: ["qingdao"],
+  厦门: ["xiamen"],
+  合肥: ["hefei"],
+  远程: ["remote", "居家", "在家办公", "wfh", "异地办公"],
+  浦东: ["浦东新区"],
+  闵行: ["闵行区"],
+  徐汇: ["徐汇区"],
+  静安: ["静安区"],
+  杨浦: ["杨浦区"],
+  虹口: ["虹口区"],
+  长宁: ["长宁区"],
+  普陀: ["普陀区"],
+  宝山: ["宝山区"],
+  嘉定: ["嘉定区"],
+  松江: ["松江区"],
+  青浦: ["青浦区"],
+  奉贤: ["奉贤区"],
+  金山: ["金山区"],
+  南汇: ["南汇区"],
+  朝阳: ["朝阳区"],
+  海淀: ["海淀区"],
+  东城: ["东城区"],
+  西城: ["西城区"],
+  丰台: ["丰台区"],
+  通州: ["通州区"],
+  昌平: ["昌平区"],
+  大兴: ["大兴区"],
+  南山: ["南山区"],
+  福田: ["福田区"],
+  宝安: ["宝安区"],
+  龙岗: ["龙岗区"],
+  龙华: ["龙华区"],
+  天河: ["天河区"],
+  番禺: ["番禺区"],
+  海珠: ["海珠区"],
+  越秀: ["越秀区"],
+  西湖: ["西湖区"],
+  余杭: ["余杭区"],
+  滨江: ["滨江区"],
+  萧山: ["萧山区"]
+};
+
+const FILTER_PRESETS = [
+  {
+    id: "backend",
+    name: "后端开发",
+    jobKeywords: "后端, Java, Go, 服务端",
+    excludeJobKeywords: "实习, 外包, 驻场",
+    jobMatchMode: "any",
+    salaryKeywords: "20-40K"
+  },
+  {
+    id: "frontend",
+    name: "前端开发",
+    jobKeywords: "前端, React, Vue, 大前端",
+    excludeJobKeywords: "实习, 外包",
+    jobMatchMode: "any",
+    salaryKeywords: "18-35K"
+  },
+  {
+    id: "fullstack",
+    name: "全栈",
+    jobKeywords: "全栈, Node, 前后端",
+    excludeJobKeywords: "实习",
+    jobMatchMode: "any",
+    salaryKeywords: "20-40K"
+  },
+  {
+    id: "product",
+    name: "产品经理",
+    jobKeywords: "产品经理, 产品专员, PM",
+    excludeJobKeywords: "实习, 助理",
+    jobMatchMode: "any",
+    salaryKeywords: "15-30K"
+  }
+];
+
 const DEFAULT_SETTINGS = {
   jobKeywords: "",
   locationKeywords: "",
+  jobMatchMode: "any",
+  excludeJobKeywords: "",
   salaryKeywords: "",
   companyKeywords: "",
   excludeCompanyKeywords: "",
   recruiterActiveStatuses: [],
   greetTemplate: "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+  greetTemplates: [
+    "您好，我对{jobTitle}岗位很感兴趣，已认真阅读职位描述，期待进一步沟通。",
+    "您好，看到{companyName}的{jobTitle}很匹配我的方向，方便进一步了解吗？",
+    "您好，我有相关项目经验，对{jobTitle}（{location}/{salary}）很感兴趣，期待沟通。"
+  ],
+  greetRotate: true,
+  dailyLimit: 50,
+  dailyCount: 0,
+  dailyCountDate: "",
+  historyRecords: [],
   sendImageResume: false,
   imageResumeFileName: "",
   imageResumeDataUrl: "",
@@ -89,13 +198,24 @@ const SELECTORS = {
     ".job-area",
     "[class*='job-area']",
     ".job-area-wrapper",
-    ".info-desc"
+    ".info-desc",
+    ".job-address"
+  ],
+  listRecruiterStatus: [
+    ".boss-online-tag",
+    ".online-tag",
+    ".info-public .status",
+    "[class*='online']",
+    "[class*='active-status']",
+    ".boss-info .tag",
+    ".job-card-footer .tag"
   ],
   detailTitle: [
     ".job-detail-box .job-title",
     ".job-detail-box .name",
     ".job-banner .name",
-    ".job-primary .name"
+    ".job-primary .name",
+    ".job-detail .name"
   ],
   detailCompany: [
     ".job-detail-box .company-name",
@@ -138,8 +258,11 @@ const SELECTORS = {
   greetButtons: [
     ".op-btn.op-btn-chat",
     ".btn-startchat",
+    ".btn-start-chat",
     ".job-detail-box .btn-chat",
     ".job-detail-box .btn",
+    ".job-detail .btn",
+    "[ka*='chat']",
     "button",
     "a"
   ],
@@ -148,24 +271,33 @@ const SELECTORS = {
     ".boss-dialog button",
     ".dialog-container button",
     ".modal button",
+    ".dialog-con button",
     "button",
     "a"
   ],
   deliverButtons: [
     ".job-detail-box .btn.btn-main",
     ".btn-apply",
-    ".job-detail-box .btn-primary"
+    ".job-detail-box .btn-primary",
+    ".job-detail .btn-primary"
   ],
   chatInput: [
+    ".chat-input textarea",
+    ".chat-editor textarea",
+    ".input-area textarea",
+    ".chat-conversation textarea",
     "textarea",
     "[contenteditable='true']",
     ".chat-input",
-    ".input-area textarea"
+    "[class*='chat-input']"
   ],
   chatSend: [
     ".btn-send",
     ".send-btn",
-    "button[type='submit']"
+    ".chat-op .btn",
+    ".submit-btn",
+    "button[type='submit']",
+    "[class*='send']"
   ],
   imageResumeInput: [
     ".chat-op input[type='file']",
@@ -216,7 +348,15 @@ const state = {
   lastAutoReplySignature: "",
   lastAutoReplyAt: 0,
   autoReplyInFlight: false,
-  autoReplyDebug: ""
+  autoReplyDebug: "",
+  statusText: "就绪",
+  lastFilterHint: "",
+  sessionCompleted: 0,
+  sessionSkipped: 0,
+  sessionFailed: 0,
+  sessionStartedAt: "",
+  onlyJobKey: "",
+  matchListExpanded: true
 };
 
 const ACTION_RESULT = {
@@ -229,10 +369,15 @@ const ACTION_RESULT = {
 
 const JOB_PAGE_HINTS = [
   "/web/geek/job",
+  "/web/geek/jobs",
+  "/web/geek/job-recommend",
+  "/web/geek/recommend",
   "/job_detail/",
   "/job_detail",
   "/c101",
-  "/web/geek/recommend"
+  "/gongsi/",
+  "positionList",
+  "joblist"
 ];
 
 if (!document.getElementById(HOST_ID)) {
@@ -242,6 +387,7 @@ if (!document.getElementById(HOST_ID)) {
 async function bootstrap() {
   try {
     state.settings = await loadSettings();
+    ensureDailyCounter();
     mountHelper();
     bindEvents();
     restorePanelPosition();
@@ -251,17 +397,84 @@ async function bootstrap() {
     installObservers();
     startAutoReplyLoop();
     syncButtonState();
+    // 首屏可能还在懒加载，稍后自动再扫一次
+    setTimeout(() => refreshPageSnapshot("延迟复检"), 1200);
+    setTimeout(() => refreshPageSnapshot("延迟复检"), 3200);
   } catch (error) {
     console.error("[boss-helper] bootstrap failed", error);
+    try {
+      // 即使设置读取失败，也尽量挂出面板，避免用户“完全看不见”
+      state.settings = { ...DEFAULT_SETTINGS };
+      if (!state.shadowRoot) {
+        mountHelper();
+        bindEvents();
+        restorePanelPosition();
+      }
+      setStatus("助手已启动，但设置读取异常，已使用默认配置", "warn");
+      refreshPageSnapshot("初始化降级");
+      installObservers();
+      syncButtonState();
+    } catch (mountError) {
+      console.error("[boss-helper] fallback mount failed", mountError);
+    }
   }
 }
 
 async function loadSettings() {
-  const response = await chrome.runtime.sendMessage({ type: "boss-helper:get-settings" });
-  return {
+  // 优先直读 storage，避免 service worker 休眠导致 sendMessage 失败
+  try {
+    if (chrome?.storage?.local?.get) {
+      const direct = await chrome.storage.local.get(DEFAULT_SETTINGS);
+      return normalizeLoadedSettings(direct);
+    }
+  } catch (error) {
+    logEvent("设置读取", `直读 storage 失败：${asMessage(error)}`);
+  }
+
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "boss-helper:get-settings" });
+    if (response?.ok === false) {
+      throw new Error(response.error || "后台返回失败");
+    }
+    return normalizeLoadedSettings(response?.settings || {});
+  } catch (error) {
+    logEvent("设置读取", `消息通道失败，使用默认设置：${asMessage(error)}`);
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function normalizeLoadedSettings(raw = {}) {
+  const merged = {
     ...DEFAULT_SETTINGS,
-    ...(response?.settings ?? {})
+    ...raw
   };
+  merged.jobKeywords = String(merged.jobKeywords || "");
+  merged.locationKeywords = String(merged.locationKeywords || "");
+  merged.salaryKeywords = String(merged.salaryKeywords || "");
+  merged.excludeJobKeywords = String(merged.excludeJobKeywords || "");
+  merged.companyKeywords = String(merged.companyKeywords || "");
+  merged.excludeCompanyKeywords = String(merged.excludeCompanyKeywords || "");
+  merged.jobMatchMode = merged.jobMatchMode === "all" ? "all" : "any";
+  merged.dailyLimit = clampNumber(Number(merged.dailyLimit), 1, 150, DEFAULT_SETTINGS.dailyLimit);
+  merged.dailyCount = clampNumber(Number(merged.dailyCount), 0, 9999, 0);
+  merged.dailyCountDate = String(merged.dailyCountDate || "");
+  merged.pollIntervalMs = clampNumber(Number(merged.pollIntervalMs), 600, 15000, DEFAULT_SETTINGS.pollIntervalMs);
+  merged.greetTemplates = Array.isArray(merged.greetTemplates)
+    ? merged.greetTemplates.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8)
+    : [...DEFAULT_SETTINGS.greetTemplates];
+  if (!merged.greetTemplates.length) {
+    merged.greetTemplates = [...DEFAULT_SETTINGS.greetTemplates];
+  }
+  merged.greetTemplate = String(merged.greetTemplate || merged.greetTemplates[0] || DEFAULT_SETTINGS.greetTemplate);
+  merged.historyRecords = Array.isArray(merged.historyRecords) ? merged.historyRecords.slice(0, 300) : [];
+  merged.recruiterActiveStatuses = Array.isArray(merged.recruiterActiveStatuses)
+    ? merged.recruiterActiveStatuses.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  merged.autoGreet = merged.autoGreet !== false;
+  merged.autoNext = merged.autoNext !== false;
+  merged.enabled = merged.enabled !== false;
+  merged.greetRotate = merged.greetRotate !== false;
+  return merged;
 }
 
 function mountHelper() {
@@ -288,31 +501,38 @@ function buildStyles() {
   const style = document.createElement("style");
   style.textContent = `
     :host { all: initial; }
-    * { box-sizing: border-box; font-family: Inter, Arial, "Microsoft YaHei", sans-serif; }
-    button, input, textarea { font: inherit; }
+    * { box-sizing: border-box; font-family: Inter, "Segoe UI", Arial, "Microsoft YaHei", sans-serif; }
+    button, input, textarea, select { font: inherit; }
     button { appearance: none; -webkit-appearance: none; }
     .panel {
-      width: 404px;
-      max-height: calc(100vh - 36px);
-      border-radius: 18px;
-      background: rgba(248, 250, 252, 0.96);
-      border: 1px solid rgba(203, 213, 225, 0.86);
-      box-shadow: 0 26px 58px rgba(15, 23, 42, 0.18);
+      width: 428px;
+      max-height: calc(100vh - 28px);
+      border-radius: 28px;
+      background:
+        radial-gradient(circle at 92% 0%, rgba(45, 212, 191, 0.16), transparent 36%),
+        radial-gradient(circle at 8% 100%, rgba(56, 189, 248, 0.12), transparent 42%),
+        linear-gradient(165deg, rgba(255,255,255,0.98) 0%, rgba(244,248,252,0.98) 100%);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      box-shadow:
+        0 28px 64px rgba(15, 23, 42, 0.16),
+        0 8px 20px rgba(15, 23, 42, 0.06),
+        inset 0 1px 0 rgba(255,255,255,0.92);
       color: #0f172a;
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      backdrop-filter: blur(14px);
+      backdrop-filter: blur(18px);
     }
     .panel.minimized {
-      width: 248px;
+      width: 268px;
+      border-radius: 999px;
     }
     .header {
-      padding: 16px;
+      padding: 18px 18px 14px;
       background:
-        radial-gradient(circle at top right, rgba(20, 184, 166, 0.12), transparent 34%),
-        linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(247,250,252,0.96) 100%);
-      border-bottom: 1px solid rgba(226, 232, 240, 0.92);
+        radial-gradient(circle at top right, rgba(20, 184, 166, 0.16), transparent 42%),
+        linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.94) 100%);
+      border-bottom: 1px solid rgba(226, 232, 240, 0.88);
       cursor: move;
       user-select: none;
     }
@@ -320,7 +540,7 @@ function buildStyles() {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 14px;
     }
     .brand {
       display: flex;
@@ -330,20 +550,22 @@ function buildStyles() {
       flex: 1 1 auto;
     }
     .logo {
-      width: 42px;
-      height: 42px;
-      border-radius: 13px;
+      width: 48px;
+      height: 48px;
+      border-radius: 18px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(135deg, #0f766e 0%, #0891b2 100%);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), 0 12px 24px rgba(8,145,178,0.22);
+      background: linear-gradient(145deg, #0f766e 0%, #0ea5e9 100%);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.28),
+        0 14px 28px rgba(8,145,178,0.28);
       color: #fff;
       flex: 0 0 auto;
     }
     .logo svg {
-      width: 20px;
-      height: 20px;
+      width: 22px;
+      height: 22px;
       stroke: currentColor;
       fill: none;
       stroke-width: 1.9;
@@ -356,7 +578,8 @@ function buildStyles() {
     .title strong {
       display: block;
       font-size: 18px;
-      font-weight: 700;
+      font-weight: 760;
+      letter-spacing: 0;
       color: #0f172a;
       line-height: 1.2;
       white-space: nowrap;
@@ -364,7 +587,7 @@ function buildStyles() {
       text-overflow: ellipsis;
     }
     .subtitle {
-      margin-top: 4px;
+      margin-top: 5px;
       font-size: 12px;
       line-height: 1.4;
       color: #64748b;
@@ -375,26 +598,26 @@ function buildStyles() {
     .tools {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 4px;
-      border: 1px solid rgba(226, 232, 240, 0.92);
-      border-radius: 14px;
-      background: rgba(255,255,255,0.9);
-      box-shadow: 0 6px 18px rgba(15,23,42,0.04);
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.92);
+      box-shadow: 0 8px 20px rgba(15,23,42,0.05);
       flex: 0 0 auto;
     }
     .icon-btn {
-      width: 32px;
-      height: 32px;
+      width: 34px;
+      height: 34px;
       border: 0;
-      border-radius: 10px;
+      border-radius: 999px;
       background: transparent;
       color: #64748b;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+      transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
     }
     .icon-btn svg {
       width: 16px;
@@ -409,12 +632,14 @@ function buildStyles() {
       background: rgba(241, 245, 249, 0.98);
       color: #0f172a;
       transform: translateY(-1px);
+      box-shadow: 0 6px 12px rgba(15, 23, 42, 0.06);
     }
     .icon-btn:focus-visible,
     .button:focus-visible,
-    .field input:focus-visible {
+    .field input:focus-visible,
+    .field select:focus-visible {
       outline: none;
-      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.18);
+      box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.16);
     }
     .icon-btn[data-action="close"]:hover {
       background: rgba(254, 226, 226, 0.96);
@@ -422,11 +647,11 @@ function buildStyles() {
     }
     .body {
       display: grid;
-      gap: 14px;
+      gap: 16px;
       min-height: 0;
       overflow: auto;
-      padding: 16px;
-      background: linear-gradient(180deg, rgba(248,250,252,0.98) 0%, rgba(241,245,249,0.98) 100%);
+      padding: 18px;
+      background: linear-gradient(180deg, rgba(248,250,252,0.72) 0%, rgba(241,245,249,0.88) 100%);
     }
     .panel.minimized .subtitle,
     .panel.minimized .body {
@@ -436,11 +661,21 @@ function buildStyles() {
       display: none;
     }
     .panel.minimized .header {
-      padding: 12px;
+      padding: 10px 12px;
+    }
+    .panel.minimized .logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
     }
     .form-area {
       display: grid;
       gap: 12px;
+      padding: 14px;
+      border-radius: 22px;
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
     }
     .grid {
       display: grid;
@@ -450,53 +685,121 @@ function buildStyles() {
     .field {
       display: flex;
       flex-direction: column;
-      gap: 7px;
+      gap: 8px;
       min-width: 0;
+    }
+    .field.full {
+      grid-column: 1 / -1;
     }
     .field label {
       font-size: 12px;
-      font-weight: 600;
-      color: #475569;
+      font-weight: 700;
+      color: #64748b;
+      padding-left: 4px;
     }
-    .field input {
+    .field input,
+    .field select {
       width: 100%;
-      height: 44px;
-      border-radius: 12px;
-      border: 1px solid #d7e0ea;
-      background: rgba(255,255,255,0.96);
-      padding: 0 14px;
+      height: 48px;
+      border-radius: 16px;
+      border: 1px solid #dbe4ee;
+      background: rgba(255,255,255,0.98);
+      padding: 0 16px;
       font-size: 14px;
       color: #0f172a;
       outline: none;
-      transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 1px 2px rgba(15, 23, 42, 0.02);
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, transform 0.16s ease;
     }
     .field input::placeholder {
       color: #94a3b8;
     }
-    .field input:focus {
-      border-color: #14b8a6;
+    .field input:focus,
+    .field select:focus {
+      border-color: #2dd4bf;
       background: #fff;
+      box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.14), 0 8px 18px rgba(15, 23, 42, 0.04);
     }
     .helper-strip {
-      padding: 11px 12px;
-      border-radius: 13px;
-      background: rgba(255,255,255,0.82);
-      border: 1px solid rgba(226, 232, 240, 0.92);
-      color: #64748b;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(240, 253, 250, 0.95), rgba(239, 246, 255, 0.92));
+      border: 1px solid rgba(204, 251, 241, 0.95);
+      color: #0f766e;
       font-size: 12px;
       line-height: 1.55;
     }
+    .setup-guide {
+      display: none;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(251, 191, 36, 0.4);
+      background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(254, 243, 199, 0.7));
+      color: #92400e;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .setup-guide.visible {
+      display: block;
+    }
+    .setup-guide strong {
+      color: #78350f;
+    }
+    .status-strip {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 13px 14px;
+      border-radius: 18px;
+      background: rgba(240, 253, 250, 0.96);
+      border: 1px solid rgba(153, 246, 228, 0.9);
+      color: #0f766e;
+      font-size: 12px;
+      line-height: 1.55;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    }
+    .status-strip[data-tone="warn"] {
+      background: rgba(255, 251, 235, 0.98);
+      border-color: rgba(253, 230, 138, 0.95);
+      color: #b45309;
+    }
+    .status-strip[data-tone="error"] {
+      background: rgba(254, 242, 242, 0.98);
+      border-color: rgba(254, 202, 202, 0.95);
+      color: #b91c1c;
+    }
+    .status-strip[data-tone="run"] {
+      background: rgba(239, 246, 255, 0.98);
+      border-color: rgba(191, 219, 254, 0.95);
+      color: #1d4ed8;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      margin-top: 4px;
+      border-radius: 999px;
+      background: currentColor;
+      flex: 0 0 auto;
+      box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.12);
+    }
+    .status-strip[data-tone="run"] .status-dot {
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.85); }
+    }
     .actions {
       display: grid;
-      grid-template-columns: 1.3fr 0.9fr;
-      gap: 10px;
+      grid-template-columns: 1.35fr 0.9fr;
+      gap: 12px;
     }
     .button {
-      height: 46px;
+      height: 50px;
       border: 0;
-      border-radius: 12px;
+      border-radius: 999px;
       font-size: 15px;
-      font-weight: 700;
+      font-weight: 760;
       cursor: pointer;
       transition: transform 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
     }
@@ -510,76 +813,220 @@ function buildStyles() {
       transform: translateY(-1px);
     }
     .button.primary {
-      background: linear-gradient(135deg, #0f766e 0%, #0891b2 100%);
+      background: linear-gradient(135deg, #0f766e 0%, #0891b2 55%, #0ea5e9 100%);
       color: #fff;
-      box-shadow: 0 14px 26px rgba(15,118,110,0.22);
+      box-shadow: 0 16px 30px rgba(15,118,110,0.24), inset 0 1px 0 rgba(255,255,255,0.22);
+    }
+    .button.primary:not(:disabled):hover {
+      box-shadow: 0 18px 34px rgba(15,118,110,0.28), inset 0 1px 0 rgba(255,255,255,0.22);
     }
     .button.secondary {
-      background: rgba(255,255,255,0.94);
+      background: rgba(255,255,255,0.96);
       color: #334155;
       border: 1px solid rgba(203, 213, 225, 0.96);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
     }
     .stats {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 10px;
     }
     .stat {
-      padding: 12px 10px;
-      border-radius: 13px;
-      background: rgba(255,255,255,0.76);
-      border: 1px solid rgba(226, 232, 240, 0.92);
+      padding: 14px 8px 12px;
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.92) 100%);
+      border: 1px solid rgba(226, 232, 240, 0.95);
       text-align: center;
+      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
     }
     .stat strong {
       display: block;
       font-size: 18px;
       line-height: 1;
-      font-weight: 700;
+      font-weight: 780;
       color: #0f172a;
     }
     .stat span {
       display: block;
-      margin-top: 6px;
-      font-size: 12px;
+      margin-top: 8px;
+      font-size: 11px;
       color: #64748b;
+      font-weight: 600;
     }
-    .log-card {
-      border-radius: 15px;
-      background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
-      border: 1px solid rgba(30, 41, 59, 0.92);
-      padding: 12px 13px;
-      color: #dbeafe;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    .stat.accent {
+      background: linear-gradient(180deg, rgba(240,253,250,0.98) 0%, rgba(236,254,255,0.95) 100%);
+      border-color: rgba(153, 246, 228, 0.9);
     }
-    .log-card-header {
+    .stat.accent strong {
+      color: #0f766e;
+    }
+    .quick-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chip {
+      height: 32px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(203, 213, 225, 0.95);
+      background: rgba(255,255,255,0.96);
+      color: #334155;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .chip:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+    }
+    .chip.active {
+      background: linear-gradient(135deg, rgba(240,253,250,0.98), rgba(224,242,254,0.96));
+      border-color: rgba(45, 212, 191, 0.55);
+      color: #0f766e;
+    }
+    .session-card {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 12px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.82);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+    }
+    .session-item {
+      text-align: center;
+      padding: 8px 4px;
+      border-radius: 14px;
+      background: rgba(248,250,252,0.96);
+    }
+    .session-item strong {
+      display: block;
+      font-size: 16px;
+      color: #0f172a;
+    }
+    .session-item span {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 600;
+    }
+    .match-panel {
+      border-radius: 20px;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      overflow: hidden;
+      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+    }
+    .match-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      margin-bottom: 8px;
-      font-size: 13px;
-      color: #cbd5e1;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(226, 232, 240, 0.9);
     }
-    .log-card-count {
-      display: inline-flex;
-      align-items: center;
-      min-height: 22px;
-      padding: 0 8px;
+    .match-head strong {
+      font-size: 13px;
+      color: #0f172a;
+    }
+    .match-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .mini-btn {
+      height: 30px;
+      padding: 0 10px;
       border-radius: 999px;
-      background: rgba(15, 118, 110, 0.22);
-      color: #99f6e4;
+      border: 1px solid rgba(203, 213, 225, 0.95);
+      background: #fff;
+      color: #475569;
       font-size: 11px;
       font-weight: 700;
+      cursor: pointer;
     }
-    .log-card-body {
-      min-height: 88px;
-      max-height: 224px;
+    .mini-btn:hover {
+      background: #f8fafc;
+    }
+    .match-list {
+      max-height: 220px;
       overflow: auto;
-      white-space: pre-wrap;
+      display: grid;
+      gap: 0;
+    }
+    .match-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 11px 12px;
+      border-bottom: 1px solid rgba(241, 245, 249, 0.98);
+      align-items: center;
+    }
+    .match-item:last-child {
+      border-bottom: 0;
+    }
+    .match-item.done {
+      opacity: 0.55;
+    }
+    .match-item.skipped {
+      opacity: 0.45;
+    }
+    .match-main {
+      min-width: 0;
+      cursor: pointer;
+    }
+    .match-title {
+      font-size: 13px;
+      font-weight: 720;
+      color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .match-meta {
+      margin-top: 3px;
+      font-size: 11px;
+      color: #64748b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .match-ops {
+      display: flex;
+      gap: 4px;
+    }
+    .icon-mini {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 999px;
+      background: #f1f5f9;
+      color: #475569;
+      cursor: pointer;
       font-size: 12px;
-      line-height: 1.62;
-      color: #cbd5e1;
+      font-weight: 700;
+    }
+    .icon-mini:hover {
+      background: #e2e8f0;
+    }
+    .icon-mini.danger:hover {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .empty-match {
+      padding: 18px 14px;
+      text-align: center;
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .footer-actions {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
     .footer {
       padding: 2px 2px 0;
@@ -610,7 +1057,7 @@ function buildPanel() {
           </div>
           <div class="title">
             <strong>BOSS海投助手</strong>
-            <div class="subtitle">页面内悬浮</div>
+            <div class="subtitle">智能筛选 · 一键沟通</div>
           </div>
         </div>
         <div class="tools">
@@ -642,39 +1089,94 @@ function buildPanel() {
     </div>
     <div class="body">
       <section class="form-area">
-        <div class="grid">
-          <div class="field"><label for="jobKeywords">职位关键词</label><input id="jobKeywords" placeholder="后端, Java, Go" /></div>
-          <div class="field"><label for="locationKeywords">工作地点</label><input id="locationKeywords" placeholder="上海, 浦东, 远程" /></div>
+        <div class="quick-row" id="presetRow">
+          <button class="chip" type="button" data-preset="backend">后端</button>
+          <button class="chip" type="button" data-preset="frontend">前端</button>
+          <button class="chip" type="button" data-preset="fullstack">全栈</button>
+          <button class="chip" type="button" data-preset="product">产品</button>
         </div>
-        <div class="helper-strip">开始前会先读完整个职位列表。</div>
+        <div class="grid">
+          <div class="field full">
+            <label for="jobKeywords">职位关键词</label>
+            <input id="jobKeywords" placeholder="后端, Java, +Go, -实习" />
+          </div>
+          <div class="field">
+            <label for="locationKeywords">工作地点</label>
+            <input id="locationKeywords" placeholder="上海, 浦东, 远程" />
+          </div>
+          <div class="field">
+            <label for="salaryKeywords">薪资要求</label>
+            <input id="salaryKeywords" placeholder="20-35K" />
+          </div>
+          <div class="field">
+            <label for="jobMatchMode">关键词模式</label>
+            <select id="jobMatchMode">
+              <option value="any">任一命中</option>
+              <option value="all">全部命中</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="dailyLimit">每日上限</label>
+            <input id="dailyLimit" type="number" min="1" max="150" step="1" />
+          </div>
+          <div class="field full">
+            <label for="excludeJobKeywords">排除职位词</label>
+            <input id="excludeJobKeywords" placeholder="实习, 外包, 驻场" />
+          </div>
+        </div>
+        <div class="helper-strip">先填关键词或点上方预设，再点「开始沟通」。招呼语、公司筛选等可在右上角高级选项设置。</div>
+        <div class="setup-guide" id="setupGuide"></div>
+        <div class="status-strip" id="statusStrip" data-tone="idle">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="statusText">准备就绪</span>
+        </div>
         <div class="actions">
-          <button class="button primary" type="button" id="startButton" data-action="start">开始海投</button>
+          <button class="button primary" type="button" id="startButton" data-action="start">开始沟通</button>
           <button class="button secondary" type="button" id="stopButton" data-action="stop">暂停</button>
         </div>
       </section>
       <section>
         <div class="stats">
-          <div class="stat"><strong id="jobCount">0</strong><span>列表职位</span></div>
-          <div class="stat"><strong id="matchCount">0</strong><span>全条件命中</span></div>
-          <div class="stat"><strong id="visitedCount">0</strong><span>已处理</span></div>
+          <div class="stat"><strong id="jobCount">0</strong><span>职位</span></div>
+          <div class="stat accent"><strong id="matchCount">0</strong><span>匹配</span></div>
+          <div class="stat"><strong id="pendingCount">0</strong><span>待沟通</span></div>
+          <div class="stat"><strong id="visitedCount">0</strong><span>已完成</span></div>
         </div>
       </section>
-      <section class="log-card">
-        <div class="log-card-header">
-          <span>运行日志</span>
-          <span class="log-card-count" id="logCount">0 条</span>
-        </div>
-        <div class="log-card-body" id="logCardBody">暂无日志。</div>
+      <section class="session-card">
+        <div class="session-item"><strong id="sessionDone">0</strong><span>本轮完成</span></div>
+        <div class="session-item"><strong id="sessionSkip">0</strong><span>本轮跳过</span></div>
+        <div class="session-item"><strong id="dailyDone">0</strong><span>今日已沟通</span></div>
       </section>
-      <div class="footer">仅在职位页生效</div>
+      <section class="match-panel">
+        <div class="match-head">
+          <strong>匹配职位</strong>
+          <div class="match-actions">
+            <button class="mini-btn" type="button" id="toggleMatchList">收起</button>
+            <button class="mini-btn" type="button" id="exportHistory">导出记录</button>
+          </div>
+        </div>
+        <div class="match-list" id="matchList">
+          <div class="empty-match">填写筛选条件后，这里会显示匹配职位。</div>
+        </div>
+      </section>
+      <div class="footer">在 BOSS 职位页使用</div>
     </div>
   `;
   return wrapper;
 }
 
 function hydrateForm() {
+  ensureDailyCounter();
   setValue("jobKeywords", state.settings.jobKeywords);
   setValue("locationKeywords", state.settings.locationKeywords);
+  setValue("salaryKeywords", state.settings.salaryKeywords || "");
+  setValue("jobMatchMode", state.settings.jobMatchMode || "any");
+  setValue("excludeJobKeywords", state.settings.excludeJobKeywords || "");
+  setValue("dailyLimit", String(state.settings.dailyLimit || 50));
+  setText("dailyDone", String(state.settings.dailyCount || 0));
+  setText("sessionDone", String(state.sessionCompleted || 0));
+  setText("sessionSkip", String(state.sessionSkipped || 0));
 }
 
 function bindEvents() {
@@ -689,15 +1191,62 @@ function bindEvents() {
   });
   shadowRoot.querySelector('[data-action="minimize"]').addEventListener("click", toggleMinimize);
   shadowRoot.querySelector('[data-action="start"]').addEventListener("click", () => void startAutomation());
-  shadowRoot.querySelector('[data-action="stop"]').addEventListener("click", stopAutomation);
+  shadowRoot.querySelector('[data-action="stop"]').addEventListener("click", () => {
+    stopAutomation();
+  });
+
+  shadowRoot.getElementById("toggleMatchList")?.addEventListener("click", () => {
+    state.matchListExpanded = !state.matchListExpanded;
+    const list = shadowRoot.getElementById("matchList");
+    const btn = shadowRoot.getElementById("toggleMatchList");
+    if (list) {
+      list.style.display = state.matchListExpanded ? "grid" : "none";
+    }
+    if (btn) {
+      btn.textContent = state.matchListExpanded ? "收起" : "展开";
+    }
+  });
+
+  shadowRoot.getElementById("exportHistory")?.addEventListener("click", () => {
+    exportHistoryRecords();
+  });
+
+  shadowRoot.getElementById("presetRow")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-preset]");
+    if (!button) {
+      return;
+    }
+    applyFilterPreset(button.dataset.preset);
+  });
+
+  shadowRoot.getElementById("matchList")?.addEventListener("click", (event) => {
+    const actionBtn = event.target.closest("[data-job-action]");
+    const item = event.target.closest("[data-job-key]");
+    if (!item) {
+      return;
+    }
+    const key = item.dataset.jobKey;
+    if (!key) {
+      return;
+    }
+    if (actionBtn) {
+      handleMatchListAction(actionBtn.dataset.jobAction, key);
+      return;
+    }
+    void focusMatchedJob(key);
+  });
+
   bindFormPersistence();
   bindDrag();
 }
 
 function bindFormPersistence() {
-  for (const id of ["jobKeywords", "locationKeywords"]) {
+  for (const id of ["jobKeywords", "locationKeywords", "salaryKeywords", "jobMatchMode", "excludeJobKeywords", "dailyLimit"]) {
     const element = state.shadowRoot.getElementById(id);
-    const eventName = element.type === "checkbox" ? "change" : "input";
+    if (!element) {
+      continue;
+    }
+    const eventName = element.tagName === "SELECT" || element.type === "checkbox" || element.type === "number" ? "change" : "input";
     element.addEventListener(eventName, () => {
       void persistSettingsFromForm();
     });
@@ -708,11 +1257,23 @@ async function openAdvancedWindow() {
   const toggle = state.shadowRoot.querySelector('[data-action="advanced"]');
   toggle.classList.add("active");
   try {
-    await chrome.runtime.sendMessage({
+    const response = await chrome.runtime.sendMessage({
       type: "boss-helper:open-advanced-window"
     });
+    if (response?.ok === false) {
+      throw new Error(response.error || "打开高级设置失败");
+    }
+    setStatus("已打开高级设置，保存后会自动同步到这里", "idle");
   } catch (error) {
-    logEvent("开窗失败", asMessage(error));
+    // 后台开窗失败时，尽量直接打开扩展内页面
+    try {
+      const url = chrome.runtime.getURL("advanced.html");
+      window.open(url, "_blank", "noopener,noreferrer");
+      setStatus("已尝试打开高级设置页", "idle");
+    } catch (fallbackError) {
+      setStatus("高级设置打开失败，请重新加载扩展后再试", "error");
+      logEvent("开窗失败", `${asMessage(error)} | ${asMessage(fallbackError)}`);
+    }
   } finally {
     setTimeout(() => {
       toggle.classList.remove("active");
@@ -762,21 +1323,244 @@ async function persistSettingsFromForm() {
   state.settings = {
     ...state.settings,
     jobKeywords: getValue("jobKeywords"),
-    locationKeywords: getValue("locationKeywords")
+    locationKeywords: getValue("locationKeywords"),
+    salaryKeywords: getValue("salaryKeywords"),
+    jobMatchMode: getValue("jobMatchMode") === "all" ? "all" : "any",
+    excludeJobKeywords: getValue("excludeJobKeywords"),
+    dailyLimit: clampNumber(Number(getValue("dailyLimit")), 1, 150, 50)
   };
+
+  const payload = { ...state.settings };
+  let saved = false;
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "boss-helper:save-settings",
+      payload
+    });
+    if (response?.ok === false) {
+      throw new Error(response.error || "后台保存失败");
+    }
+    if (response?.settings) {
+      state.settings = normalizeLoadedSettings(response.settings);
+    }
+    saved = true;
+  } catch (error) {
+    logEvent("保存失败", `消息通道：${asMessage(error)}`);
+  }
+
+  // service worker 休眠时直写 storage，避免设置丢失
+  if (!saved && chrome?.storage?.local?.set) {
+    try {
+      await chrome.storage.local.set(payload);
+      saved = true;
+    } catch (error) {
+      logEvent("保存失败", `直写 storage：${asMessage(error)}`);
+      setStatus("设置暂未保存成功，请检查扩展是否仍启用", "warn");
+    }
+  }
+
+  if (saved) {
+    ensureDailyCounter();
+    hydrateForm();
+  }
+
+  refreshPageSnapshot("筛选条件更新");
+  if (state.running) {
+    restartAutomationLoop();
+  }
+}
+
+function applyFilterPreset(presetId) {
+  const preset = FILTER_PRESETS.find((item) => item.id === presetId);
+  if (!preset) {
+    return;
+  }
+
+  state.settings = {
+    ...state.settings,
+    jobKeywords: preset.jobKeywords,
+    excludeJobKeywords: preset.excludeJobKeywords,
+    jobMatchMode: preset.jobMatchMode || "any",
+    salaryKeywords: preset.salaryKeywords || state.settings.salaryKeywords
+  };
+
+  hydrateForm();
+  void persistSettingsFromForm();
+  setStatus(`已应用「${preset.name}」筛选`, "idle");
+
+  const chips = state.shadowRoot?.querySelectorAll("[data-preset]") || [];
+  for (const chip of chips) {
+    chip.classList.toggle("active", chip.dataset.preset === presetId);
+  }
+}
+
+function ensureDailyCounter() {
+  const today = getTodayKey();
+  if (state.settings.dailyCountDate !== today) {
+    state.settings.dailyCountDate = today;
+    state.settings.dailyCount = 0;
+  }
+}
+
+function getTodayKey() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function getRemainingDailyQuota() {
+  ensureDailyCounter();
+  const limit = clampNumber(Number(state.settings.dailyLimit), 1, 150, 50);
+  const used = clampNumber(Number(state.settings.dailyCount), 0, 9999, 0);
+  return Math.max(limit - used, 0);
+}
+
+async function bumpDailyCountAndHistory(job, status = "greeted") {
+  ensureDailyCounter();
+  state.settings.dailyCount = clampNumber(Number(state.settings.dailyCount), 0, 9999, 0) + 1;
+  state.sessionCompleted += 1;
+
+  const record = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    at: new Date().toISOString(),
+    title: job?.title || "",
+    company: job?.company || "",
+    salary: job?.salary || "",
+    location: job?.location || "",
+    status
+  };
+
+  const history = Array.isArray(state.settings.historyRecords) ? state.settings.historyRecords.slice() : [];
+  history.unshift(record);
+  state.settings.historyRecords = history.slice(0, 300);
+
+  setText("dailyDone", String(state.settings.dailyCount));
+  setText("sessionDone", String(state.sessionCompleted));
 
   try {
     await chrome.runtime.sendMessage({
       type: "boss-helper:save-settings",
-      payload: state.settings
+      payload: {
+        dailyCount: state.settings.dailyCount,
+        dailyCountDate: state.settings.dailyCountDate,
+        historyRecords: state.settings.historyRecords
+      }
     });
   } catch (error) {
-    logEvent("保存失败", asMessage(error));
+    logEvent("保存统计失败", asMessage(error));
+  }
+}
+
+function exportHistoryRecords() {
+  const records = Array.isArray(state.settings.historyRecords) ? state.settings.historyRecords : [];
+  if (!records.length) {
+    setStatus("暂无沟通记录可导出", "warn");
+    return;
   }
 
-  if (state.running) {
-    restartAutomationLoop();
+  const header = ["时间", "职位", "公司", "薪资", "地点", "状态"];
+  const lines = [header.join(",")].concat(records.map((item) => {
+    return [
+      item.at || "",
+      item.title || "",
+      item.company || "",
+      item.salary || "",
+      item.location || "",
+      item.status || ""
+    ].map(csvEscape).join(",");
+  }));
+
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `boss-helper-history-${getTodayKey()}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  setStatus(`已导出 ${records.length} 条沟通记录`, "idle");
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
   }
+  return text;
+}
+
+async function focusMatchedJob(key) {
+  const snapshot = collectPageSnapshot();
+  const job = snapshot.jobs.find((item) => item.key === key);
+  if (!job) {
+    setStatus("未找到该职位，请刷新后重试", "warn");
+    return;
+  }
+  setStatus(`已定位：${job.title || "职位"}`, "idle");
+  await focusJob(job);
+}
+
+function handleMatchListAction(action, key) {
+  if (action === "skip") {
+    state.skippedJobs.add(key);
+    state.sessionSkipped += 1;
+    setText("sessionSkip", String(state.sessionSkipped));
+    setStatus("已跳过该职位", "warn");
+    refreshPageSnapshot("手动跳过职位");
+    return;
+  }
+
+  if (action === "only") {
+    state.onlyJobKey = key;
+    setStatus("将仅沟通该职位", "run");
+    if (!state.running) {
+      void startAutomation();
+    }
+  }
+}
+
+function renderMatchList(snapshot) {
+  const list = state.shadowRoot?.getElementById("matchList");
+  if (!list) {
+    return;
+  }
+
+  const matched = snapshot.jobs.filter((job) => job.matches).slice(0, 30);
+  if (!matched.length) {
+    let emptyText = "填写职位关键词或点上方预设后，这里会显示匹配职位。";
+    if (!snapshot.onJobPage) {
+      emptyText = "请先打开 BOSS「职位」列表页。";
+    } else if (snapshot.jobs.length) {
+      const shortHint = buildShortMismatchHint(snapshot.jobs);
+      emptyText = shortHint
+        ? `当前条件暂无匹配。${shortHint}`
+        : "当前条件暂无匹配职位，可放宽筛选后再试。";
+    } else {
+      emptyText = "职位列表还在加载，或页面结构未识别。可点刷新重试。";
+    }
+    list.innerHTML = `<div class="empty-match">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+
+  list.innerHTML = matched.map((job) => {
+    const done = state.visitedJobs.has(job.key);
+    const skipped = state.skippedJobs.has(job.key);
+    const className = ["match-item", done ? "done" : "", skipped ? "skipped" : ""].filter(Boolean).join(" ");
+    const badge = done ? "已完成" : skipped ? "已跳过" : (job.salary || "待沟通");
+    return `
+      <div class="${className}" data-job-key="${escapeHtml(job.key)}">
+        <div class="match-main" title="点击定位职位">
+          <div class="match-title">${escapeHtml(job.title || "未识别职位")}</div>
+          <div class="match-meta">${escapeHtml([job.company, job.location, badge].filter(Boolean).join(" · "))}</div>
+        </div>
+        <div class="match-ops">
+          <button class="icon-mini" type="button" data-job-action="only" title="仅沟通此项">1</button>
+          <button class="icon-mini danger" type="button" data-job-action="skip" title="跳过">×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 function handleStorageChanges(changes, areaName) {
@@ -796,6 +1580,8 @@ function handleStorageChanges(changes, areaName) {
     return;
   }
 
+  state.settings = normalizeLoadedSettings(state.settings);
+  ensureDailyCounter();
   hydrateForm();
   if (state.running) {
     restartAutomationLoop();
@@ -870,7 +1656,8 @@ function refreshPageSnapshot(reason) {
 }
 
 function collectPageSnapshot() {
-  const onJobPage = isBossJobPage();
+  const pageState = detectPageState();
+  const onJobPage = pageState.ready;
   const jobs = onJobPage ? collectJobList() : [];
   const currentJob = onJobPage ? collectCurrentJobFromList(jobs) : null;
 
@@ -888,6 +1675,7 @@ function collectPageSnapshot() {
     url: location.href,
     title: document.title,
     onJobPage,
+    pageState,
     jobs,
     currentJob,
     capturedAt: new Date().toLocaleTimeString()
@@ -956,6 +1744,7 @@ function parseJobCard(element, index) {
   ]);
 
   const recruiterStatus = firstNonEmpty([
+    pickText(element, SELECTORS.listRecruiterStatus),
     findRecruiterActivityLikeText(element),
     extractRecruiterActivityFromText(element.textContent)
   ]);
@@ -1062,15 +1851,249 @@ function collectCurrentDetail(jobs) {
 }
 
 function renderSnapshot(snapshot, reason) {
-  const matchedCount = snapshot.jobs.filter((job) => job.matches).length;
-  const showKnownCounts = state.fullListReadComplete || state.preloading || state.running;
-  setText("jobCount", showKnownCounts ? String(snapshot.jobs.length) : "未知");
-  setText("matchCount", showKnownCounts ? String(matchedCount) : "未知");
+  ensureDailyCounter();
+  const matchedJobs = snapshot.jobs.filter((job) => job.matches);
+  const pendingCount = matchedJobs.filter((job) => {
+    return !state.visitedJobs.has(job.key) && !state.skippedJobs.has(job.key);
+  }).length;
+  const showKnownCounts = state.fullListReadComplete || state.preloading || state.running || matchedJobs.length > 0;
+  setText("jobCount", showKnownCounts ? String(snapshot.jobs.length) : "—");
+  setText("matchCount", showKnownCounts ? String(matchedJobs.length) : "—");
+  setText("pendingCount", showKnownCounts ? String(pendingCount) : "—");
   setText("visitedCount", String(state.visitedJobs.size));
-  renderLogCard();
+  setText("dailyDone", String(state.settings.dailyCount || 0));
+  setText("sessionDone", String(state.sessionCompleted || 0));
+  setText("sessionSkip", String(state.sessionSkipped || 0));
+  updateStatusStrip(snapshot, reason, matchedJobs.length, pendingCount);
+  renderMatchList(snapshot);
   syncButtonState(snapshot);
 }
 
+function updateStatusStrip(snapshot, reason, matchedCount, pendingCount) {
+  if (!state.shadowRoot) {
+    return;
+  }
+
+  const readiness = evaluateReadiness(snapshot, matchedCount, pendingCount);
+  renderSetupGuide(readiness);
+
+  let tone = "idle";
+  let text = state.statusText || "就绪";
+
+  if (state.running || state.preloading || state.processing) {
+    // 运行态优先保留当前状态
+  } else if (readiness.blockingMessage) {
+    tone = readiness.tone || "warn";
+    text = readiness.blockingMessage;
+  }
+
+  if (!snapshot.onJobPage) {
+    tone = "warn";
+    text = readiness.blockingMessage || "请先打开 BOSS 职位列表页";
+  } else if (state.preloading) {
+    tone = "run";
+    text = "正在准备职位列表...";
+  } else if (state.running && state.processing) {
+    tone = "run";
+    text = `正在沟通：${state.currentJob?.title || "当前职位"}`;
+  } else if (state.running) {
+    tone = "run";
+    text = pendingCount > 0
+      ? `沟通进行中，还有 ${pendingCount} 个待沟通`
+      : "沟通进行中，等待更多匹配职位";
+  } else if (reason === "手动暂停" || reason === "检测到沟通上限") {
+    tone = reason === "检测到沟通上限" ? "error" : "warn";
+    text = state.statusText || (reason === "检测到沟通上限" ? "今日沟通次数已达上限" : "已暂停");
+  } else if (reason === "筛选条件更新" || reason === "设置已更新" || reason === "手动刷新") {
+    tone = matchedCount > 0 ? "idle" : "warn";
+    text = readiness.blockingMessage
+      || (snapshot.jobs.length
+        ? `已匹配 ${matchedCount} 个职位，待沟通 ${pendingCount}`
+        : "页面已打开，正在等待职位列表加载");
+    if (!matchedCount && snapshot.jobs.length) {
+      const hint = buildMismatchSummary(snapshot.jobs);
+      if (hint && hint !== state.lastFilterHint) {
+        state.lastFilterHint = hint;
+        logEvent("筛选提示", hint.replace(/\n/g, " | "));
+      }
+    }
+  } else if (String(reason || "").includes("失败") || String(reason || "").includes("上限")) {
+    tone = "error";
+    text = state.statusText || reason || "出现异常";
+  } else if (state.fullListReadComplete) {
+    tone = matchedCount > 0 ? "idle" : "warn";
+    text = readiness.blockingMessage
+      || (matchedCount > 0
+        ? `准备就绪：匹配 ${matchedCount}，待沟通 ${pendingCount}`
+        : "暂无匹配职位，可放宽筛选条件");
+  } else if (snapshot.onJobPage && !readiness.blockingMessage) {
+    tone = matchedCount > 0 ? "idle" : "idle";
+    text = matchedCount > 0
+      ? `已识别 ${snapshot.jobs.length} 个职位，匹配 ${matchedCount}`
+      : (snapshot.jobs.length ? "职位已识别，可继续调整筛选" : "职位页已打开，等待列表加载");
+  }
+
+  state.statusText = text;
+  const strip = state.shadowRoot.getElementById("statusStrip");
+  const label = state.shadowRoot.getElementById("statusText");
+  if (strip) {
+    strip.dataset.tone = tone;
+  }
+  if (label) {
+    label.textContent = text;
+  }
+}
+
+function evaluateReadiness(snapshot, matchedCount = 0, pendingCount = 0) {
+  const pageState = snapshot.pageState || detectPageState();
+  const hasJobKeywords = Boolean(String(state.settings.jobKeywords || "").trim());
+  const remainingQuota = getRemainingDailyQuota();
+  const tips = [];
+  let tone = "idle";
+  let blockingMessage = "";
+  // 职位列表可能懒加载：页面就绪时允许启动，由启动流程负责完整读取
+  let canStart = pageState.ready && remainingQuota > 0;
+
+  if (!pageState.ready) {
+    canStart = false;
+    tone = "warn";
+    blockingMessage = pageState.message;
+    tips.push(pageState.tip || "请打开 BOSS 顶部「职位」页，并确保左侧有职位列表。");
+  } else if (remainingQuota <= 0) {
+    canStart = false;
+    tone = "error";
+    blockingMessage = "今日沟通次数已达设置上限";
+    tips.push(`当前每日上限 ${state.settings.dailyLimit}，可在面板调高后继续。`);
+  }
+
+  if (pageState.ready && !hasJobKeywords) {
+    tone = "warn";
+    tips.push("还没填职位关键词：会匹配当前列表中的大部分职位。建议点上方预设，或填写如「后端, Java」。");
+  }
+
+  if (pageState.ready && snapshot.jobs.length === 0) {
+    tone = "warn";
+    if (!blockingMessage) {
+      blockingMessage = "暂未识别到职位列表，可点开始尝试加载";
+    }
+    tips.push("请确认已登录 BOSS，并等待左侧职位列表加载；也可直接点开始沟通自动滚动加载。");
+  }
+
+  if (pageState.ready && snapshot.jobs.length > 0 && matchedCount === 0) {
+    tone = "warn";
+    const shortHint = buildShortMismatchHint(snapshot.jobs);
+    if (state.fullListReadComplete) {
+      // 完整列表已读完仍无匹配，才真正拦截
+      canStart = false;
+      blockingMessage = "当前筛选条件下没有可沟通职位";
+      if (shortHint) {
+        tips.push(shortHint);
+      }
+      tips.push("可放宽关键词、地点、薪资，或切换为「任一命中」。");
+    } else {
+      blockingMessage = shortHint
+        ? `当前可见职位未匹配（${shortHint}）`
+        : "当前可见职位未匹配，可点开始继续加载更多";
+      tips.push("先点「开始沟通」，助手会自动滚动加载完整列表再筛选。");
+      if (shortHint) {
+        tips.push(shortHint);
+      }
+    }
+  }
+
+  if (pageState.ready && matchedCount > 0 && remainingQuota > 0) {
+    tips.push(`今日还可沟通 ${remainingQuota} 次 · 待沟通 ${pendingCount}`);
+  }
+
+  if (state.settings.sendImageResume && !state.settings.imageResumeDataUrl) {
+    tips.push("已开启图片简历，但还没上传文件，请到高级选项补充。");
+  }
+
+  return {
+    canStart,
+    tone,
+    blockingMessage,
+    tips: uniqueStrings(tips).slice(0, 3),
+    remainingQuota,
+    hasJobKeywords,
+    pageState
+  };
+}
+
+function renderSetupGuide(readiness) {
+  const guide = state.shadowRoot?.getElementById("setupGuide");
+  if (!guide) {
+    return;
+  }
+
+  if (!readiness?.tips?.length || state.running || state.preloading) {
+    guide.classList.remove("visible");
+    guide.innerHTML = "";
+    return;
+  }
+
+  const title = readiness.canStart ? "使用提示" : "还差一步就能开始";
+  guide.innerHTML = `<strong>${title}</strong><br>${readiness.tips.map((tip) => `• ${escapeHtml(tip)}`).join("<br>")}`;
+  guide.classList.add("visible");
+}
+
+function buildShortMismatchHint(jobs) {
+  const sample = (jobs || []).filter((job) => !job.matches).slice(0, 8);
+  if (!sample.length) {
+    return "";
+  }
+
+  const counters = {
+    title: 0,
+    excludeTitle: 0,
+    location: 0,
+    company: 0,
+    excludeCompany: 0,
+    salary: 0,
+    recruiter: 0
+  };
+
+  for (const job of sample) {
+    const details = job.matchDetails || {};
+    if (!details.titleOk) counters.title += 1;
+    if (!details.excludeTitleOk) counters.excludeTitle += 1;
+    if (!details.locationOk) counters.location += 1;
+    if (!details.companyOk) counters.company += 1;
+    if (!details.excludeCompanyOk) counters.excludeCompany += 1;
+    if (!details.salaryOk) counters.salary += 1;
+    if (!details.recruiterStatusOk) counters.recruiter += 1;
+  }
+
+  const ranked = [
+    [counters.title, "职位关键词没命中"],
+    [counters.excludeTitle, "命中了排除职位词"],
+    [counters.location, "工作地点不符"],
+    [counters.salary, "薪资要求过严或岗位无薪资"],
+    [counters.company, "公司关键词没命中"],
+    [counters.excludeCompany, "命中了排除公司词"],
+    [counters.recruiter, "招聘方活跃状态不符"]
+  ].filter(([count]) => count > 0).sort((a, b) => b[0] - a[0]);
+
+  if (!ranked.length) {
+    return "列表有职位，但都被当前筛选挡掉了。";
+  }
+
+  return `主要卡在：${ranked.slice(0, 2).map((item) => item[1]).join("、")}`;
+}
+
+function setStatus(text, tone = "idle") {
+  state.statusText = text;
+  const strip = state.shadowRoot?.getElementById("statusStrip");
+  const label = state.shadowRoot?.getElementById("statusText");
+  if (strip) {
+    strip.dataset.tone = tone;
+  }
+  if (label) {
+    label.textContent = text;
+  }
+}
+
+// 保留内部记录能力，默认不在界面展示（面向客户）
 function logEvent(type, message) {
   state.logs.unshift({
     type,
@@ -1078,41 +2101,37 @@ function logEvent(type, message) {
     time: new Date().toLocaleTimeString()
   });
   state.logs = state.logs.slice(0, MAX_LOGS);
-  renderLogCard();
-}
-
-function renderLogCard() {
-  if (!state.shadowRoot) {
-    return;
-  }
-
-  const count = state.shadowRoot.getElementById("logCount");
-  const body = state.shadowRoot.getElementById("logCardBody");
-  if (!count || !body) {
-    return;
-  }
-
-  count.textContent = `${state.logs.length} 条`;
-  body.textContent = state.logs.length
-    ? state.logs.slice(0, 20).map((item) => `${item.time} ${item.type}：${item.message}`).join("\n")
-    : "暂无日志。";
 }
 
 function syncButtonState(snapshot = collectPageSnapshot()) {
   const startButton = state.shadowRoot.getElementById("startButton");
   const stopButton = state.shadowRoot.getElementById("stopButton");
+  if (!startButton || !stopButton) {
+    return;
+  }
 
-  startButton.disabled = state.running || state.startButtonLocked || state.preloading || !snapshot.onJobPage;
+  const matchedCount = snapshot.jobs.filter((job) => job.matches).length;
+  const pendingCount = snapshot.jobs.filter((job) => {
+    return job.matches && !state.visitedJobs.has(job.key) && !state.skippedJobs.has(job.key);
+  }).length;
+  const readiness = evaluateReadiness(snapshot, matchedCount, pendingCount);
+
+  const blocked = state.running || state.startButtonLocked || state.preloading || !readiness.canStart;
+  startButton.disabled = blocked;
   stopButton.disabled = !state.running;
 
   if (state.running) {
-    startButton.textContent = state.processing ? "执行中..." : "运行中";
+    startButton.textContent = state.processing ? "沟通中..." : "进行中";
   } else if (state.preloading) {
-    startButton.textContent = "读取职位中...";
+    startButton.textContent = "准备中...";
   } else if (!snapshot.onJobPage) {
     startButton.textContent = "请进入职位页";
+  } else if (getRemainingDailyQuota() <= 0) {
+    startButton.textContent = "今日已达上限";
+  } else if (snapshot.jobs.length > 0 && !matchedCount && state.fullListReadComplete) {
+    startButton.textContent = "暂无匹配";
   } else {
-    startButton.textContent = "开始海投";
+    startButton.textContent = "开始沟通";
   }
 }
 
@@ -1122,16 +2141,38 @@ async function startAutomation() {
   }
 
   let snapshot = collectPageSnapshot();
+  const matchedPreview = snapshot.jobs.filter((job) => job.matches).length;
+  const readiness = evaluateReadiness(snapshot, matchedPreview, matchedPreview);
+  renderSetupGuide(readiness);
+
   if (!snapshot.onJobPage) {
-    logEvent("启动失败", "当前不是职位页。请点击顶部“职位”导航后再启动。");
+    setStatus(readiness.blockingMessage || "请先打开职位列表页", "error");
+    logEvent("启动失败", readiness.pageState?.tip || "当前不是职位页。请点击顶部“职位”导航后再启动。");
     refreshPageSnapshot("启动失败：非职位页");
     return;
+  }
+
+  if (getRemainingDailyQuota() <= 0) {
+    setStatus("今日沟通次数已达设置上限，可在面板调高每日上限", "error");
+    refreshPageSnapshot("启动失败：达到每日上限");
+    return;
+  }
+
+  if (!String(state.settings.jobKeywords || "").trim()) {
+    setStatus("未填职位关键词，将按当前列表宽匹配启动", "warn");
   }
 
   state.startButtonLocked = true;
   state.fullListReadComplete = false;
   state.skippedJobs.clear();
   state.failedJobAttempts.clear();
+  state.sessionCompleted = 0;
+  state.sessionSkipped = 0;
+  state.sessionFailed = 0;
+  state.sessionStartedAt = new Date().toISOString();
+  setText("sessionDone", "0");
+  setText("sessionSkip", "0");
+  setStatus("正在准备匹配职位...", "run");
   syncButtonState(snapshot);
 
   try {
@@ -1140,29 +2181,51 @@ async function startAutomation() {
     snapshot = collectPageSnapshot();
 
     if (detectCommunicationLimitModal()) {
+      setStatus("BOSS 提示今日沟通次数已达上限，请明天再试", "error");
       logEvent("启动失败", "检测到“无法进行沟通”提示，今天的沟通额度可能已用完，请明天再试。");
       refreshPageSnapshot("启动失败：沟通额度已达上限");
       return;
     }
 
     if (!snapshot.jobs.length) {
+      setStatus("还没识别到职位列表，请确认已登录并等待页面加载", "error");
       logEvent("启动失败", "已经滑动到底，但仍未识别到职位列表。");
       refreshPageSnapshot("启动失败：未识别职位列表");
       return;
     }
 
-    if (!snapshot.jobs.some((job) => job.matches)) {
+    const matchedJobs = snapshot.jobs.filter((job) => job.matches);
+    if (!matchedJobs.length) {
+      const summary = buildMismatchSummary(snapshot.jobs);
+      const shortHint = buildShortMismatchHint(snapshot.jobs);
+      setStatus(shortHint ? `暂无匹配：${shortHint}` : "暂无匹配职位，可放宽筛选条件", "error");
       logEvent("启动失败", "完整读取列表后仍没有职位命中筛选条件，请调整关键词或放宽可选筛选。");
+      if (summary) {
+        logEvent("筛选提示", summary.replace(/\n/g, " | "));
+      }
       refreshPageSnapshot("启动失败：没有匹配职位");
       return;
     }
 
-    await chrome.runtime.sendMessage({ type: "boss-helper:start-delivery" });
+    if (state.onlyJobKey && !matchedJobs.some((job) => job.key === state.onlyJobKey)) {
+      state.onlyJobKey = "";
+    }
+
+    try {
+      await chrome.runtime.sendMessage({ type: "boss-helper:start-delivery" });
+    } catch (error) {
+      // 后台仅做运行态记录，失败不阻断主流程
+      logEvent("启动提示", `后台状态记录失败（不影响沟通）：${asMessage(error)}`);
+    }
+
     state.running = true;
-    logEvent("启动成功", `开始自动海投，轮询间隔 ${state.settings.pollIntervalMs}ms。`);
+    const quota = getRemainingDailyQuota();
+    setStatus(`开始沟通：匹配 ${matchedJobs.length}，今日剩余 ${quota}`, "run");
+    logEvent("启动成功", `开始自动海投，命中 ${matchedJobs.length}，轮询间隔 ${state.settings.pollIntervalMs}ms。`);
     refreshPageSnapshot("启动海投");
     restartAutomationLoop();
   } catch (error) {
+    setStatus(`启动失败：${asMessage(error)}`, "error");
     logEvent("启动失败", asMessage(error));
     refreshPageSnapshot("启动失败：消息发送异常");
   } finally {
@@ -1185,6 +2248,7 @@ function stopAutomation(options = {}) {
   state.running = false;
   state.processing = false;
   clearTimeout(state.loopTimer);
+  setStatus(runtimeStatus === "communication_limit" ? "今日沟通次数已达上限" : "已暂停", "warn");
   void chrome.runtime.sendMessage({
     type: "boss-helper:update-runtime",
     payload: { lastStatus: runtimeStatus }
@@ -1221,26 +2285,70 @@ async function automationTick() {
       return;
     }
 
+    if (getRemainingDailyQuota() <= 0) {
+      stopAutomation({
+        runtimeStatus: "daily_limit",
+        logType: "达到上限",
+        logMessage: "已达到设置的每日沟通上限。",
+        refreshReason: "达到每日上限"
+      });
+      setStatus("今日沟通次数已达设置上限", "error");
+      return;
+    }
+
     const snapshot = collectPageSnapshot();
     const nextJob = snapshot.jobs.find((job) => {
-      return job.matches && !state.visitedJobs.has(job.key) && !state.skippedJobs.has(job.key);
+      if (!job.matches || state.visitedJobs.has(job.key) || state.skippedJobs.has(job.key)) {
+        return false;
+      }
+      if (state.onlyJobKey) {
+        return job.key === state.onlyJobKey;
+      }
+      return true;
     });
 
     if (!nextJob) {
       const matchedCount = snapshot.jobs.filter((job) => job.matches).length;
+      if (state.onlyJobKey) {
+        state.onlyJobKey = "";
+        stopAutomation({
+          runtimeStatus: "completed",
+          logType: "完成",
+          logMessage: "指定职位已处理完成。",
+          refreshReason: "单职位处理完成"
+        });
+        setStatus("指定职位已处理完成", "idle");
+        return;
+      }
+      setStatus("暂无待沟通职位，正在查找更多", "run");
       logEvent("等待中", `没有可继续处理的匹配职位。命中 ${matchedCount}，已处理 ${state.visitedJobs.size}，已跳过 ${state.skippedJobs.size}。`);
       await tryLoadMoreJobsFromList();
       refreshPageSnapshot("没有新的匹配职位");
       return;
     }
 
-    logEvent("选中职位", `${nextJob.title || "未识别职位"} / ${nextJob.company || "-"}`);
-    await focusJob(nextJob);
+    state.currentJob = nextJob;
+    setStatus(`正在沟通：${nextJob.title || "当前职位"}`, "run");
+    logEvent("选中职位", `${nextJob.title || "未识别职位"} / ${nextJob.company || "-"} / ${nextJob.location || "-"}`);
+    const focused = await focusJob(nextJob);
     if (!state.running) {
       return;
     }
+    if (!focused) {
+      const attempts = registerJobFailure(nextJob);
+      logEvent("未完成", `详情未切换到目标职位：${nextJob.title || "当前职位"} (${attempts}/${MAX_JOB_RETRIES})`);
+      if (attempts >= MAX_JOB_RETRIES) {
+        state.skippedJobs.add(nextJob.key);
+        state.sessionSkipped += 1;
+        setText("sessionSkip", String(state.sessionSkipped));
+        logEvent("已跳过", `${nextJob.title || "当前职位"} 详情切换失败，已跳过。`);
+      }
+      refreshPageSnapshot("详情切换失败");
+      return;
+    }
+
     refreshPageSnapshot("已点击职位卡片");
-    await wait(1000);
+    await wait(500);
     if (!state.running || pauseForCommunicationLimit("切换职位后")) {
       return;
     }
@@ -1253,7 +2361,7 @@ async function automationTick() {
       actionResult = await tryPrimaryAction(nextJob);
     } else {
       actionResult = {
-        status: ACTION_RESULT.pending,
+        status: ACTION_RESULT.greeted,
         message: "已关闭自动打招呼，仅切换职位。"
       };
     }
@@ -1262,19 +2370,48 @@ async function automationTick() {
     }
 
     if (actionResult.status === ACTION_RESULT.paused) {
+      setStatus("今日沟通次数已达上限", "error");
       refreshPageSnapshot("检测到沟通上限");
       return;
     }
 
     if (actionResult.status === ACTION_RESULT.greeted || actionResult.status === ACTION_RESULT.delivered) {
       state.visitedJobs.add(nextJob.key);
+      state.failedJobAttempts.delete(nextJob.key);
+      await bumpDailyCountAndHistory(nextJob, actionResult.status);
+      setStatus(`已完成：${nextJob.title || "当前职位"}（今日 ${state.settings.dailyCount}/${state.settings.dailyLimit}）`, "run");
       refreshPageSnapshot("处理完成");
       logEvent("完成", `已处理 ${nextJob.title || "当前职位"}。`);
+
+      if (state.onlyJobKey === nextJob.key) {
+        state.onlyJobKey = "";
+        stopAutomation({
+          runtimeStatus: "completed",
+          logType: "完成",
+          logMessage: "指定职位沟通完成。",
+          refreshReason: "单职位处理完成"
+        });
+        setStatus("指定职位沟通完成", "idle");
+        return;
+      }
+
+      if (getRemainingDailyQuota() <= 0) {
+        stopAutomation({
+          runtimeStatus: "daily_limit",
+          logType: "达到上限",
+          logMessage: "已达到设置的每日沟通上限。",
+          refreshReason: "达到每日上限"
+        });
+        setStatus("今日沟通次数已达设置上限", "error");
+      }
     } else {
       const attempts = registerJobFailure(nextJob);
       refreshPageSnapshot("沟通未完成");
       if (attempts >= MAX_JOB_RETRIES) {
         state.skippedJobs.add(nextJob.key);
+        state.sessionSkipped += 1;
+        state.sessionFailed += 1;
+        setText("sessionSkip", String(state.sessionSkipped));
         logEvent("已跳过", `${nextJob.title || "当前职位"} 连续 ${attempts} 次沟通失败，已跳过以避免循环。`);
       } else {
         await tryLoadMoreJobs(nextJob);
@@ -1299,10 +2436,11 @@ function registerJobFailure(job) {
 }
 
 async function focusJob(job) {
+  job.element.scrollIntoView({ block: "center", behavior: "smooth" });
+  await wait(180);
   const clickable = findSafeClickable(job.element) || job.element;
   triggerSafeClick(clickable);
-  job.element.scrollIntoView({ block: "center", behavior: "smooth" });
-  await waitForJobDetail(job);
+  return waitForJobDetail(job);
 }
 
 async function tryPrimaryAction(job) {
@@ -1310,13 +2448,27 @@ async function tryPrimaryAction(job) {
     return buildPausedActionResult();
   }
 
+  // 优先在右侧详情区找沟通按钮，避免点到列表里无关按钮
   const detailRoot = findRootBySelectors(SELECTORS.detailContainers) || document;
-  const greetButton = findClickable(SELECTORS.greetButtons, ["立即沟通", "沟通", "打招呼"], {
-    root: detailRoot,
-    preferExact: true
-  });
+  const greetButton = await waitForClickable(
+    SELECTORS.greetButtons,
+    ["立即沟通", "沟通", "打招呼", "继续沟通", "继续聊天"],
+    { root: detailRoot, preferExact: true },
+    ACTION_WAIT_ATTEMPTS,
+    ACTION_WAIT_STEP_MS
+  );
+
   if (greetButton) {
     const buttonLabel = normalizeText(greetButton.textContent) || "立即沟通";
+    const alreadyChatting = /继续沟通|继续聊天|已沟通/.test(buttonLabel);
+
+    if (alreadyChatting) {
+      return {
+        status: ACTION_RESULT.greeted,
+        message: `该职位已处于沟通状态：${job.title || "当前职位"}`
+      };
+    }
+
     const clicked = triggerSafeClick(greetButton);
     let choseStayOnPage = false;
     if (!clicked) {
@@ -1326,23 +2478,30 @@ async function tryPrimaryAction(job) {
       };
     }
 
-    await wait(1200);
+    await wait(700);
     if (!state.running || pauseForCommunicationLimit("点击沟通后")) {
       return buildPausedActionResult();
     }
 
-    const stayButton = findClickable(SELECTORS.stayButtons, ["留在此页"], {
-      root: findVisibleDialogRoot() || document,
-      preferExact: true
-    });
-    if (stayButton && triggerSafeClick(stayButton)) {
-      await wait(400);
-      choseStayOnPage = true;
+    // 弹窗可能稍后出现，多轮探测「留在此页」
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const stayButton = findClickable(SELECTORS.stayButtons, ["留在此页"], {
+        root: findVisibleDialogRoot() || document,
+        preferExact: true
+      });
+      if (stayButton && triggerSafeClick(stayButton)) {
+        await wait(350);
+        choseStayOnPage = true;
+        break;
+      }
+      await wait(220);
     }
 
-    const continueButton = findClickable(SELECTORS.stayButtons, ["继续沟通", "继续聊天", "已沟通"], {
-      root: detailRoot
-    });
+    const continueButton = findClickable(
+      SELECTORS.greetButtons.concat(SELECTORS.stayButtons),
+      ["继续沟通", "继续聊天", "已沟通"],
+      { root: detailRoot }
+    );
     if (continueButton) {
       return {
         status: ACTION_RESULT.greeted,
@@ -1364,11 +2523,20 @@ async function tryPrimaryAction(job) {
       return buildPausedActionResult();
     }
 
+    // 点击沟通后若出现聊天输入框，也视为进入沟通链路
+    if (findVisibleChatInput()) {
+      return {
+        status: ACTION_RESULT.greeted,
+        message: choseStayOnPage
+          ? `已点击 ${buttonLabel} 并留在此页，聊天框已出现：${job.title || "当前职位"}`
+          : `已点击 ${buttonLabel}，聊天框已出现：${job.title || "当前职位"}`
+      };
+    }
+
     return {
-      status: choseStayOnPage ? ACTION_RESULT.greeted : ACTION_RESULT.failed,
-      message: choseStayOnPage
-        ? `已点击 ${buttonLabel}，并选择留在此页：${job.title || "当前职位"}`
-        : `已尝试点击 ${buttonLabel}，但页面没有出现沟通反馈：${job.title || "当前职位"}`
+      status: ACTION_RESULT.failed,
+      message: greetResult.message
+        || `已尝试点击 ${buttonLabel}，但页面没有出现沟通反馈：${job.title || "当前职位"}`
     };
   }
 
@@ -1376,6 +2544,7 @@ async function tryPrimaryAction(job) {
     root: detailRoot
   });
   if (deliverButton && triggerSafeClick(deliverButton)) {
+    await wait(500);
     return {
       status: ACTION_RESULT.delivered,
       message: "未找到沟通按钮，已点击投递按钮。"
@@ -1389,7 +2558,10 @@ async function tryPrimaryAction(job) {
 }
 
 function buildGreetingMessage(job) {
-  const template = state.settings.greetTemplate || DEFAULT_SETTINGS.greetTemplate;
+  const templates = getGreetingTemplates();
+  const template = templates[Math.floor(Math.random() * templates.length)]
+    || state.settings.greetTemplate
+    || DEFAULT_SETTINGS.greetTemplate;
   const message = template
     .replaceAll("{jobTitle}", job.title || "该岗位")
     .replaceAll("{companyName}", job.company || "贵公司")
@@ -1399,32 +2571,58 @@ function buildGreetingMessage(job) {
   return message;
 }
 
+function getGreetingTemplates() {
+  const fromList = Array.isArray(state.settings.greetTemplates)
+    ? state.settings.greetTemplates.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const fromSingle = String(state.settings.greetTemplate || "").trim();
+  const merged = fromList.length ? fromList : (fromSingle ? [fromSingle] : [DEFAULT_SETTINGS.greetTemplate]);
+
+  if (state.settings.greetRotate === false) {
+    return [merged[0]];
+  }
+  return uniqueStrings(merged);
+}
+
 function fillChatInput(message) {
   for (const selector of SELECTORS.chatInput) {
-    const element = document.querySelector(selector);
-    if (!element) {
-      continue;
-    }
-
-    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
-      if (!isElementVisible(element)) {
+    const elements = Array.from(document.querySelectorAll(selector));
+    for (const element of elements) {
+      if (!(element instanceof HTMLElement) || !isElementVisible(element)) {
         continue;
       }
-      element.focus();
-      element.value = message;
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
-      return { filled: true };
-    }
 
-    if (element instanceof HTMLElement && element.getAttribute("contenteditable") === "true") {
-      if (!isElementVisible(element)) {
-        continue;
+      if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+        element.focus();
+        const prototype = Object.getPrototypeOf(element);
+        const valueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+        if (valueSetter) {
+          valueSetter.call(element, message);
+        } else {
+          element.value = message;
+        }
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Unidentified" }));
+        element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Unidentified" }));
+        return { filled: true, element };
       }
-      element.focus();
-      element.textContent = message;
-      element.dispatchEvent(new InputEvent("input", { bubbles: true, data: message, inputType: "insertText" }));
-      return { filled: true };
+
+      if (element.getAttribute("contenteditable") === "true") {
+        element.focus();
+        try {
+          document.execCommand("selectAll", false, null);
+          document.execCommand("insertText", false, message);
+        } catch (_error) {
+          element.textContent = message;
+        }
+        element.dispatchEvent(new InputEvent("input", {
+          bubbles: true,
+          data: message,
+          inputType: "insertText"
+        }));
+        return { filled: true, element };
+      }
     }
   }
 
@@ -1432,12 +2630,25 @@ function fillChatInput(message) {
 }
 
 function clickChatSend() {
+  // 优先文案精确匹配「发送」，再回退到选择器
+  const byText = findClickable(SELECTORS.chatSend, ["发送", "send"], {
+    root: document,
+    preferExact: true
+  });
+  if (byText && triggerSafeClick(byText)) {
+    return true;
+  }
+
   for (const selector of SELECTORS.chatSend) {
-    const element = document.querySelector(selector);
-    if (element instanceof HTMLElement && isElementVisible(element) && !isElementDisabled(element)) {
+    for (const element of Array.from(document.querySelectorAll(selector))) {
+      if (!(element instanceof HTMLElement) || !isElementVisible(element) || isElementDisabled(element)) {
+        continue;
+      }
       const text = normalizeText(element.textContent);
-      if (!text || text.includes("发送") || text.includes("send")) {
-        return triggerSafeClick(element);
+      if (!text || /发送|send/i.test(text)) {
+        if (triggerSafeClick(element)) {
+          return true;
+        }
       }
     }
   }
@@ -1445,18 +2656,46 @@ function clickChatSend() {
 }
 
 async function trySendGreeting(job) {
+  // 聊天框可能晚于按钮出现，先轮询输入框
+  let inputReady = findVisibleChatInput();
+  for (let attempt = 0; attempt < 8 && !inputReady; attempt += 1) {
+    await wait(280);
+    inputReady = findVisibleChatInput();
+  }
+
+  if (!inputReady) {
+    return {
+      sent: false,
+      message: "未出现聊天输入框。"
+    };
+  }
+
   const imageResumeResult = await tryUploadImageResumeIfNeeded();
   const message = buildGreetingMessage(job);
   const fillResult = fillChatInput(message);
   if (!fillResult.filled) {
     return {
       sent: false,
-      imageUploaded: imageResumeResult.uploaded
+      imageUploaded: imageResumeResult.uploaded,
+      message: "已找到聊天输入框，但无法填入招呼语。"
     };
   }
 
-  await wait(250);
-  if (clickChatSend()) {
+  await wait(280);
+  if (!clickChatSend()) {
+    // 部分页面支持 Ctrl/Cmd + Enter 发送
+    fillResult.element?.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+      code: "Enter",
+      ctrlKey: true
+    }));
+    await wait(200);
+  }
+
+  const sentConfirmed = await waitForGreetingSent(message, 8);
+  if (sentConfirmed || !findVisibleChatInputHasText(message)) {
     const parts = [];
     if (imageResumeResult.uploaded) {
       parts.push("已发送图片简历");
@@ -1473,9 +2712,41 @@ async function trySendGreeting(job) {
   return {
     sent: false,
     message: imageResumeResult.uploaded
-      ? "已发送图片简历，但未找到发送按钮。"
-      : "已打开聊天输入框，但未找到发送按钮。"
+      ? "已发送图片简历，但招呼语发送未确认。"
+      : "已填入招呼语，但发送未确认。"
   };
+}
+
+function findVisibleChatInputHasText(message) {
+  const expected = normalizeCompareText(message);
+  const input = findVisibleChatInput();
+  if (!input) {
+    return false;
+  }
+  const current = normalizeCompareText(
+    input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement
+      ? input.value
+      : input.textContent
+  );
+  return Boolean(current) && (current === expected || current.includes(expected.slice(0, 12)));
+}
+
+async function waitForGreetingSent(message, attempts = 8) {
+  const expected = normalizeCompareText(message).slice(0, 18);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!findVisibleChatInputHasText(message)) {
+      return true;
+    }
+    // 聊天区出现自己刚发的文案也算成功
+    const chatTexts = Array.from(document.querySelectorAll(SELECTORS.chatMessages.join(",")))
+      .map((node) => normalizeCompareText(node.textContent))
+      .filter(Boolean);
+    if (expected && chatTexts.some((text) => text.includes(expected))) {
+      return true;
+    }
+    await wait(260);
+  }
+  return false;
 }
 
 async function tryUploadImageResumeIfNeeded() {
@@ -1636,6 +2907,7 @@ async function tryLoadMoreJobsFromList() {
 async function preloadFullJobList() {
   state.preloading = true;
   state.fullListReadComplete = false;
+  setStatus("正在准备职位列表...", "run");
   syncButtonState();
   logEvent("预加载", "正在滑动到列表底部，加载完整职位信息。");
 
@@ -1643,23 +2915,30 @@ async function preloadFullJobList() {
     const listScroller = findJobListScroller();
     let lastCount = collectJobList().length;
     let stableRounds = 0;
+    let lastScrollTop = -1;
 
-    for (let round = 0; round < 18; round += 1) {
+    for (let round = 0; round < 24; round += 1) {
       if (listScroller) {
+        const nextTop = Math.min(listScroller.scrollTop + Math.max(listScroller.clientHeight * 0.9, 480), listScroller.scrollHeight);
         listScroller.scrollTo({
-          top: listScroller.scrollHeight,
+          top: nextTop,
           behavior: "smooth"
         });
+        if (Math.abs(nextTop - lastScrollTop) < 2) {
+          listScroller.scrollTop = listScroller.scrollHeight;
+        }
+        lastScrollTop = listScroller.scrollTop;
       } else {
-        window.scrollTo({
-          top: document.documentElement.scrollHeight,
+        window.scrollBy({
+          top: Math.max(window.innerHeight * 0.8, 600),
           behavior: "smooth"
         });
       }
 
-      await wait(850);
+      await wait(900);
       const nextCount = collectJobList().length;
       setText("jobCount", String(nextCount));
+      setStatus(`准备中：已发现 ${nextCount} 个职位`, "run");
 
       if (nextCount <= lastCount) {
         stableRounds += 1;
@@ -1673,6 +2952,14 @@ async function preloadFullJobList() {
         break;
       }
     }
+
+    // 回到列表顶部，便于从第一个命中职位开始
+    if (listScroller) {
+      listScroller.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    await wait(400);
 
     state.fullListReadComplete = true;
     refreshPageSnapshot("职位列表预加载完成");
@@ -1931,21 +3218,66 @@ async function sendAutoReply(message) {
 }
 
 function isBossJobPage() {
+  return detectPageState().ready;
+}
+
+function detectPageState() {
   const path = location.pathname || "";
   const href = location.href || "";
-  if (JOB_PAGE_HINTS.some((hint) => path.includes(hint) || href.includes(hint))) {
-    return true;
+  const host = location.hostname || "";
+
+  if (!/zhipin\.com$/i.test(host) && !/\.zhipin\.com$/i.test(host)) {
+    return {
+      ready: false,
+      code: "wrong_site",
+      message: "请在 BOSS 直聘网站使用本助手",
+      tip: "请打开 www.zhipin.com，并进入顶部「职位」页面。"
+    };
   }
 
-  const activeNav = Array.from(document.querySelectorAll("a, span"))
-    .map((node) => normalizeText(node.textContent))
-    .find((text) => text === "职位");
+  // 常见非职位页
+  if (/\/web\/geek\/chat|\/web\/geek\/resume|\/web\/user|\/web\/geek\/notify/i.test(path)) {
+    return {
+      ready: false,
+      code: "wrong_route",
+      message: "当前是消息/简历页，请切换到「职位」",
+      tip: "点击顶部导航「职位」，进入左侧有职位列表的页面后再开始。"
+    };
+  }
 
   const hasJobList = Boolean(
-    document.querySelector(".job-list-box, .search-job-result, .search-job-list, .job-card-wrapper")
+    document.querySelector(".job-list-box, .search-job-result, .search-job-list, .job-card-wrapper, .job-list-item, [class*='job-card']")
   );
+  const hintMatched = JOB_PAGE_HINTS.some((hint) => path.includes(hint) || href.includes(hint));
+  const activeNav = Array.from(document.querySelectorAll("a, span"))
+    .map((node) => normalizeText(node.textContent))
+    .some((text) => text === "职位");
 
-  return Boolean(activeNav && hasJobList);
+  if (hasJobList || (hintMatched && activeNav) || hintMatched) {
+    // 有列表 DOM 或职位路由，都视为可用页；列表为空时由上层继续提示
+    return {
+      ready: true,
+      code: hasJobList ? "ready" : "route_ready",
+      message: "",
+      tip: hasJobList ? "" : "职位页已打开，若列表为空请稍等或点刷新。"
+    };
+  }
+
+  if (/\/web\/geek\//i.test(path)) {
+    return {
+      ready: false,
+      code: "geek_other",
+      message: "请进入「职位」列表页再开始",
+      tip: "在 BOSS 顶部点「职位」，等左侧职位卡片出现后再点开始沟通。"
+    };
+  }
+
+  return {
+    ready: false,
+    code: "not_job_page",
+    message: "请先打开 BOSS 职位列表页",
+    tip: "推荐路径：登录 BOSS → 顶部「职位」→ 看到左侧职位列表。"
+  };
 }
 
 function isJobCardActive(element) {
@@ -2043,15 +3375,35 @@ function isElementDisabled(element) {
 }
 
 async function waitForJobDetail(job) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < DETAIL_WAIT_ATTEMPTS; attempt += 1) {
     const detailTitle = queryText(SELECTORS.detailTitle);
     const detailCompany = queryText(SELECTORS.detailCompany);
-    if (sameMeaningfulText(detailTitle, job.title) || (sameMeaningfulText(detailTitle, job.title) && sameMeaningfulText(detailCompany, job.company))) {
+    const titleMatched = sameMeaningfulText(detailTitle, job.title);
+    const companyMatched = sameMeaningfulText(detailCompany, job.company);
+
+    if (titleMatched || (detailTitle && companyMatched && fuzzyIncludes(detailTitle, job.title))) {
       return true;
     }
-    await wait(260);
+
+    // 卡片高亮也视为切换成功的弱信号
+    if (isJobCardActive(job.element) && attempt >= 3 && (detailTitle || detailCompany)) {
+      return true;
+    }
+
+    await wait(DETAIL_WAIT_STEP_MS);
   }
   return false;
+}
+
+async function waitForClickable(selectorGroups, textHints, options = {}, attempts = 8, stepMs = 280) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const button = findClickable(selectorGroups, textHints, options);
+    if (button) {
+      return button;
+    }
+    await wait(stepMs);
+  }
+  return null;
 }
 
 function findClickable(selectorGroups, textHints, options = {}) {
@@ -2085,14 +3437,19 @@ function findClickable(selectorGroups, textHints, options = {}) {
         score += 60;
       }
 
-      if (preferExact && !hints.some((hint) => text === hint)) {
+      if (preferExact && !hints.some((hint) => text === hint || text.startsWith(hint))) {
         score -= 40;
+      }
+
+      // 过滤明显无关按钮，减少误点
+      if (/收藏|分享|举报|不感兴趣|关闭|取消|下载app|登录|注册/.test(text)) {
+        score -= 100;
       }
 
       if (element.tagName === "BUTTON") {
         score += 20;
       }
-      if (element.matches(".btn, .op-btn, [role='button']")) {
+      if (element.matches(".btn, .op-btn, .btn-startchat, [role='button']")) {
         score += 15;
       }
       if (element.closest(".job-detail-box, .job-card-right, .boss-dialog, .dialog-container, .modal, [role='dialog']")) {
@@ -2181,15 +3538,17 @@ function cleanTextByContext(text, selector) {
 }
 
 function getJobMatchDetails(job) {
-  const titleOk = matchesLooseTokens(job.title, state.settings.jobKeywords);
+  const titleOk = matchesJobKeywords(job.title, state.settings.jobKeywords, state.settings.jobMatchMode);
+  const excludeTitleOk = !matchesExcludedTokens(job.title, state.settings.excludeJobKeywords);
   const locationOk = matchesLocation(job.location, state.settings.locationKeywords);
-  const companyOk = matchesLooseTokens(job.company, state.settings.companyKeywords);
-  const excludeCompanyOk = !matchesExcludedCompany(job.company, state.settings.excludeCompanyKeywords);
+  const companyOk = matchesKeywordExpression(job.company, state.settings.companyKeywords, "any");
+  const excludeCompanyOk = !matchesExcludedTokens(job.company, state.settings.excludeCompanyKeywords);
   const salaryOk = matchesSalary(job.salary, state.settings.salaryKeywords);
   const recruiterStatusOk = matchesRecruiterActivity(job.recruiterStatus, state.settings.recruiterActiveStatuses);
   return {
-    matches: titleOk && locationOk && companyOk && excludeCompanyOk && salaryOk && recruiterStatusOk,
+    matches: titleOk && excludeTitleOk && locationOk && companyOk && excludeCompanyOk && salaryOk && recruiterStatusOk,
     titleOk,
+    excludeTitleOk,
     locationOk,
     companyOk,
     excludeCompanyOk,
@@ -2198,22 +3557,86 @@ function getJobMatchDetails(job) {
   };
 }
 
-function matchesLooseTokens(text, keywordString) {
-  const tokens = splitKeywords(keywordString);
-  if (!tokens.length) {
-    return true;
-  }
-  const haystack = normalizeCompareText(text);
-  return tokens.some((token) => haystack.includes(normalizeCompareText(token)));
+// 职位关键词：支持 +必须 / -排除；模式 any=任一命中，all=全部命中
+function matchesJobKeywords(text, keywordString, mode = "any") {
+  return matchesKeywordExpression(text, keywordString, mode);
 }
 
-function matchesExcludedCompany(text, keywordString) {
+function matchesKeywordExpression(text, keywordString, mode = "any") {
+  const expression = parseKeywordExpression(keywordString);
+  const haystack = normalizeCompareText(text);
+
+  if (expression.exclude.some((token) => tokenMatchesHaystack(haystack, token))) {
+    return false;
+  }
+
+  if (!expression.include.length) {
+    return true;
+  }
+
+  if (mode === "all" || expression.requireAll) {
+    return expression.include.every((token) => tokenMatchesHaystack(haystack, token));
+  }
+
+  return expression.include.some((token) => tokenMatchesHaystack(haystack, token));
+}
+
+function matchesExcludedTokens(text, keywordString) {
   const tokens = splitKeywords(keywordString);
   if (!tokens.length) {
     return false;
   }
   const haystack = normalizeCompareText(text);
-  return tokens.some((token) => haystack.includes(normalizeCompareText(token)));
+  return tokens.some((token) => tokenMatchesHaystack(haystack, normalizeCompareText(token.replace(/^[-+]/, ""))));
+}
+
+function parseKeywordExpression(input) {
+  const rawTokens = splitKeywords(input);
+  const include = [];
+  const exclude = [];
+  let requireAll = false;
+
+  for (const raw of rawTokens) {
+    if (raw.startsWith("-") && raw.length > 1) {
+      exclude.push(normalizeCompareText(raw.slice(1)));
+      continue;
+    }
+    if (raw.startsWith("+") && raw.length > 1) {
+      include.push(normalizeCompareText(raw.slice(1)));
+      requireAll = true;
+      continue;
+    }
+    include.push(normalizeCompareText(raw));
+  }
+
+  return {
+    include: uniqueStrings(include.filter(Boolean)),
+    exclude: uniqueStrings(exclude.filter(Boolean)),
+    requireAll
+  };
+}
+
+function tokenMatchesHaystack(haystack, token) {
+  const needle = normalizeCompareText(token);
+  if (!needle) {
+    return false;
+  }
+
+  // 短英文词做边界匹配，避免 go 误伤 google
+  if (/^[a-z0-9+#.+]+$/i.test(needle) && needle.length <= 3) {
+    const pattern = new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(needle)}(?:$|[^a-z0-9])`, "i");
+    return pattern.test(haystack);
+  }
+
+  return haystack.includes(needle);
+}
+
+function matchesLooseTokens(text, keywordString) {
+  return matchesKeywordExpression(text, keywordString, "any");
+}
+
+function matchesExcludedCompany(text, keywordString) {
+  return matchesExcludedTokens(text, keywordString);
 }
 
 function matchesLocation(text, keywordString) {
@@ -2222,12 +3645,44 @@ function matchesLocation(text, keywordString) {
     return true;
   }
 
-  const haystack = normalizeLocationForCompare(text);
-  const primaryLocation = normalizeLocationForCompare(extractPrimaryLocation(text));
+  const haystack = expandLocationText(text);
+  const primaryLocation = expandLocationText(extractPrimaryLocation(text));
+
   return tokens.some((token) => {
-    const normalizedToken = normalizeLocationForCompare(token);
-    return primaryLocation === normalizedToken || haystack.includes(normalizedToken);
+    const expandedToken = expandLocationText(token);
+    return locationTokenHit(primaryLocation, expandedToken) || locationTokenHit(haystack, expandedToken);
   });
+}
+
+function locationTokenHit(haystack, token) {
+  if (!token) {
+    return false;
+  }
+  if (haystack === token || haystack.includes(token) || token.includes(haystack)) {
+    return true;
+  }
+  // 别名展开后的片段再比一次
+  const haystackParts = haystack.split("|").filter(Boolean);
+  const tokenParts = token.split("|").filter(Boolean);
+  return tokenParts.some((part) => haystackParts.some((item) => item === part || item.includes(part) || part.includes(item)));
+}
+
+function expandLocationText(text) {
+  const normalized = normalizeLocationForCompare(text);
+  if (!normalized) {
+    return "";
+  }
+
+  const aliases = [normalized];
+  for (const [canonical, list] of Object.entries(LOCATION_ALIASES)) {
+    const canon = normalizeLocationForCompare(canonical);
+    const all = [canon, ...list.map((item) => normalizeLocationForCompare(item))];
+    if (all.some((item) => item && (normalized.includes(item) || item.includes(normalized)))) {
+      aliases.push(...all);
+    }
+  }
+
+  return uniqueStrings(aliases.filter(Boolean)).join("|");
 }
 
 function matchesSalary(jobSalary, keywordString) {
@@ -2237,6 +3692,11 @@ function matchesSalary(jobSalary, keywordString) {
   }
   const parsedJob = parseSalaryRange(jobSalary);
   if (!parsedJob) {
+    // 面议/薪资缺失时：若用户填了明确薪资区间，默认不命中，避免误投
+    const hasNumericFilter = tokens.some((token) => Boolean(parseSalaryRange(token)));
+    if (hasNumericFilter) {
+      return false;
+    }
     return tokens.some((token) => normalizeCompareText(jobSalary).includes(normalizeCompareText(token)));
   }
 
@@ -2341,6 +3801,9 @@ function buildMismatchSummary(jobs) {
     if (!job.matchDetails?.titleOk) {
       reasons.push(`职位不符(${job.title || "-"})`);
     }
+    if (!job.matchDetails?.excludeTitleOk) {
+      reasons.push(`职位已排除(${job.title || "-"})`);
+    }
     if (!job.matchDetails?.locationOk) {
       reasons.push(`地点不符(${job.location || "-"})`);
     }
@@ -2354,9 +3817,9 @@ function buildMismatchSummary(jobs) {
       reasons.push(`薪资不符(${job.salary || "-"})`);
     }
     if (!job.matchDetails?.recruiterStatusOk) {
-      reasons.push(`状态不符(${job.recruiterStatus || "-"})`);
+      reasons.push(`状态不符(${job.recruiterStatus || "未识别"})`);
     }
-    return `${index + 1}. ${job.title || "未识别职位"}：${reasons.join("，")}`;
+    return `${index + 1}. ${job.title || "未识别职位"}：${reasons.join("，") || "条件未命中"}`;
   });
 
   return `未命中原因：\n${lines.join("\n")}`;
@@ -2511,6 +3974,23 @@ function sameMeaningfulText(a, b) {
     return false;
   }
   return left === right || left.includes(right) || right.includes(left);
+}
+
+function fuzzyIncludes(a, b) {
+  const left = normalizeCompareText(a);
+  const right = normalizeCompareText(b);
+  if (!left || !right) {
+    return false;
+  }
+  return left.includes(right) || right.includes(left);
+}
+
+function uniqueStrings(values) {
+  return values.filter((item, index, list) => item && list.indexOf(item) === index);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function asMessage(error) {
